@@ -94,14 +94,16 @@ class MapTests(unittest.TestCase):
 
 
 class FishingDefaultsTests(unittest.TestCase):
-    def test_bundled_hotbar_match_survives_a_durability_bar(self):
+    def test_hotbar_match_survives_a_durability_bar(self):
         reference = cv2.imread(str(ASSETS / "bedrock-hotbar-rod.png"))
         slot = reference.copy()
         slot[32:, :, :] = 0
         slot[35:38, 4:35] = (0, 255, 0)
-        rod = HotbarRod(reference, ignore_durability=True)
-        self.assertTrue(rod.matches(slot))
-        self.assertFalse(rod.matches(cv2.rotate(slot, cv2.ROTATE_90_CLOCKWISE)))
+        learned = HotbarRod(reference)
+        bundled = HotbarRod(reference, reference)
+        for rod, muted in ((learned, False), (bundled, False), (bundled, True)):
+            self.assertTrue(rod.matches(slot, muted=muted))
+            self.assertFalse(rod.matches(cv2.rotate(slot, cv2.ROTATE_90_CLOCKWISE), muted=muted))
 
     def test_search_is_centered_and_capped_at_common_resolutions(self):
         for width, height in ((1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)):

@@ -729,7 +729,7 @@ class Calibration:
             alternate_path = ASSETS / f"{self.key}-muted-rod.png"
             alternate = (cv2.imread(str(alternate_path))
                          if path.parent == ASSETS and alternate_path.is_file() else None)
-            rod = HotbarRod(reference, alternate, ignore_durability=path.parent == ASSETS)
+            rod = HotbarRod(reference, alternate)
             uncast_path = self.rod_reference("uncast")
             if uncast_path.is_file():
                 try:

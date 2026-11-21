@@ -49,19 +49,17 @@ def read_selected_slot(screen, hwnd, *, muted=False):
 
 
 class HotbarRod:
-    def __init__(self, reference, muted_reference=None, *, ignore_durability=False):
+    def __init__(self, reference, muted_reference=None):
         self.reference = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
         self.muted_reference = (cv2.cvtColor(muted_reference, cv2.COLOR_BGR2GRAY)
                                 if muted_reference is not None else None)
-        self.ignore_durability = ignore_durability
 
     def matches(self, slot, *, muted=False):
         reference = self.muted_reference if muted else self.reference
         if slot is None or reference is None:
             return False
         gray = cv2.cvtColor(slot, cv2.COLOR_BGR2GRAY)
-        if self.ignore_durability:
-            # Check the upper rod while excluding the slot border and the changing durability bar.
-            gray = gray[4:32, 4:38]
-            reference = reference[4:32, 4:38]
+        # Exclude the slot border and the changing durability bar for every rod.
+        gray = gray[4:32, 4:38]
+        reference = reference[4:32, 4:38]
         return cv2.matchTemplate(gray, reference, cv2.TM_CCOEFF_NORMED).item() >= 0.84
