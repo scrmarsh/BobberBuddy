@@ -729,7 +729,7 @@ class Calibration:
             alternate_path = ASSETS / f"{self.key}-muted-rod.png"
             alternate = (cv2.imread(str(alternate_path))
                          if path.parent == ASSETS and alternate_path.is_file() else None)
-            rod = HotbarRod(reference, alternate)
+            rod = HotbarRod(reference, alternate, ignore_durability=path.parent == ASSETS)
             uncast_path = self.rod_reference("uncast")
             if uncast_path.is_file():
                 try:
@@ -904,7 +904,7 @@ class Calibration:
                     detail = "Resume Minecraft and keep the game in the foreground."
                 elif not event.rod_selected:
                     self.menu_status.set("Fishing paused")
-                    detail = "Select the fishing rod to resume."
+                    detail = "Waiting to verify the selected rod in the hotbar."
                 elif not event.rod_visible:
                     self.menu_status.set("Fishing paused")
                     detail = "Rod selected · Waiting for the held rod to appear."
