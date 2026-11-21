@@ -454,7 +454,7 @@ class SeedMap:
                                    parent=self.root):
                 webbrowser.open(url)
 
-    def close(self):
+    def close(self, *, wait=False):
         if self.process is not None:
             process = self.process
             self.process = None
@@ -462,6 +462,15 @@ class SeedMap:
                 process.stdin.close()
             except OSError:
                 pass
+            if wait:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=3)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
 
     def zoom(self, action):
         self.send(action)

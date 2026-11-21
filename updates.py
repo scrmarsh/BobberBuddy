@@ -1,11 +1,17 @@
 import json
 import hashlib
+import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from app_info import DATA_DIR, RELEASE_REPOSITORY, VERSION
+from app_info import DATA_DIR, FROZEN, RELEASE_REPOSITORY, UPDATER_NAME, VERSION
 
 
 RELEASE_NOTES_URL = f"https://github.com/{RELEASE_REPOSITORY}/releases"
@@ -36,7 +42,7 @@ def is_update(version):
     return version is not None and tuple(map(int, version.split("."))) > tuple(map(int, VERSION.split(".")))
 
 
-def download_release(version, release, progress):
+def release_asset(version, release):
     name = f"Bobber-Buddy-v{version}-Windows-x64.zip"
     asset = next((item for item in release.get("assets", []) if item.get("name") == name), None)
     if asset is None:
@@ -48,22 +54,33 @@ def download_release(version, release, progress):
     size = int(asset["size"])
     if not 0 < size <= 400 * 1024 * 1024:
         raise ValueError("The download size is invalid.")
+    return name, digest[1], url, size
+
+
+def downloads_directory():
     directory = DATA_DIR / "updates"
     directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def download_release(version, release, progress):
+    name, digest, url, size = release_asset(version, release)
+    directory = downloads_directory()
     target = directory / name
     if target.is_file():
         with target.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() == digest[1]:
+            if hashlib.file_digest(stream, "sha256").hexdigest() == digest:
                 return target
-    partial = target.with_suffix(".part")
     checksum = hashlib.sha256()
     received = 0
+    partial = None
     try:
         with urlopen(Request(url, headers={"User-Agent": "Bobber-Buddy"}), timeout=10) as response:
             final = urlparse(response.geturl())
             if final.scheme != "https" or final.hostname not in {"github.com", "release-assets.githubusercontent.com"}:
                 raise ValueError("GitHub returned an unexpected download host.")
-            with partial.open("wb") as output:
+            with tempfile.NamedTemporaryFile(dir=directory, suffix=".part", delete=False) as output:
+                partial = Path(output.name)
                 while block := response.read(256 * 1024):
                     received += len(block)
                     if received > size:
@@ -71,9 +88,40 @@ def download_release(version, release, progress):
                     checksum.update(block)
                     output.write(block)
                     progress(received * 100 // size)
-        if received != size or checksum.hexdigest() != digest[1]:
+        if received != size or checksum.hexdigest() != digest:
             raise ValueError("The update failed its SHA-256 check.")
         partial.replace(target)
     finally:
-        partial.unlink(missing_ok=True)
+        if partial is not None:
+            partial.unlink(missing_ok=True)
     return target
+
+
+def update_result():
+    try:
+        result = json.loads((DATA_DIR / "update-result.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def start_installer(version, archive, digest):
+    if not FROZEN:
+        raise OSError("Automatic installation requires the Windows bundle.")
+    install = Path(sys.executable).resolve().parent
+    with tempfile.NamedTemporaryFile(dir=install, prefix=".update-write-check-"):
+        pass
+    directory = Path(tempfile.mkdtemp(prefix="installer-", dir=downloads_directory()))
+    try:
+        helper = directory / f"{UPDATER_NAME}.exe"
+        shutil.copyfile(install / helper.name, helper)
+        job = directory / "request.json"
+        job.write_text(json.dumps(dict(version=version, sha256=digest, archive=str(archive.resolve()),
+                                       install=str(install), parent=os.getpid(),
+                                       result=str(DATA_DIR / "update-result.json"))), encoding="utf-8")
+        subprocess.Popen([str(helper), str(job)], cwd=directory,
+                         env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"},
+                         creationflags=subprocess.CREATE_NO_WINDOW)
+    except (OSError, ValueError):
+        shutil.rmtree(directory, ignore_errors=True)
+        raise

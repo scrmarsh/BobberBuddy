@@ -31,6 +31,8 @@ If a spot gives false bites or fails to track the float, use **Sample region (12
 
 The Windows package saves settings and session logs under `%LOCALAPPDATA%\Bobber Buddy`.
 
+Starting with v1.0.3, the Windows package can install verified updates and restart automatically when fishing and calibration are idle. **Settings → Updates → Open downloads folder** opens the actual download location.
+
 ## Optional seed minimap
 
 Open **Minimap** and enter your seed, edition, game version, and dimension. To follow your position, enable **Show Coordinates** in Bedrock or leave the **F3** XYZ readout visible in Java.

@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 from PyInstaller.__main__ import run
 
-from app_info import APP_NAME, ASSETS, ROOT, VERSION
+from app_info import APP_NAME, ASSETS, ROOT, UPDATER_NAME, VERSION
 
 
 def main():
@@ -53,6 +53,11 @@ def main():
         "--hidden-import", "clr", str(ROOT / "calibrate.py"),
     ])
     bundle = dist / APP_NAME
+    run([
+        "--noconfirm", "--onefile", "--windowed", "--name", UPDATER_NAME,
+        "--workpath", str(ROOT / "build" / "pyinstaller-updater"), "--specpath", str(stage),
+        "--distpath", str(bundle), "--icon", str(icon), str(ROOT / "update_install.py"),
+    ])
     shutil.copy2(ROOT / "README.md", bundle / "README.md")
     base = dist / f"Bobber-Buddy-v{VERSION}-Windows-x64"
     archive = Path(shutil.make_archive(str(base), "zip", root_dir=dist, base_dir=APP_NAME))

@@ -26,9 +26,10 @@ from hotkeys import GameZoomKeys, Hotkeys, KEYS, MAP_KEYS, VIRTUAL_KEYS
 from matcher import Matcher, bgr
 from seed_map import APP_NAME, MAP_ZOOM_COMMANDS, SeedMap, coordinate
 from status_popup import FishingState, FishingStatusPopup
-from app_info import ASSETS, DATA_DIR, VERSION
+from app_info import ASSETS, DATA_DIR, FROZEN, VERSION
 from navigation import guidance, world_key
-from updates import RELEASE_NOTES_URL, download_release, is_update, latest_release
+from updates import (RELEASE_NOTES_URL, download_release, downloads_directory, is_update,
+                     latest_release, release_asset, start_installer, update_result)
 
 
 LOCAL = DATA_DIR
@@ -313,6 +314,7 @@ class Calibration:
         self.update_pool = ThreadPoolExecutor(max_workers=1)
         self.update_task = None
         self.update_progress = None
+        self.pending_update = None
         try:
             self.settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -420,7 +422,7 @@ class Calibration:
         if self.settings.get("check_updates", True):
             root.after_idle(self.check_updates)
 
-    def check_updates(self):
+    def check_updates(self, *, retry_failed=False):
         if self.closing or (self.update_task is not None and not self.update_task.done()):
             return
         self.update_status.set("Checking GitHub…")
@@ -434,7 +436,8 @@ class Calibration:
             version, release = result
             if auto_download and is_update(version):
                 try:
-                    return version, download_release(version, release, update_progress), None
+                    archive = download_release(version, release, update_progress)
+                    return version, (version, archive, release_asset(version, release)[1]), None
                 except (OSError, ValueError, KeyError) as error:
                     return version, None, str(error)
             return version, None, None
@@ -458,14 +461,61 @@ class Calibration:
                 self.update_status.set("GitHub unavailable. Check again later.")
                 return
             status = f"Latest stable version · {version}" if version else "No stable release published"
-            if downloaded:
-                status = f"Update v{version} verified and saved in the updates folder"
+            previous = update_result()
+            if downloaded and previous.get("version") == version and previous.get("error") and not retry_failed:
+                status = f"Could not install v{version} · {previous['error']}"
+            elif downloaded:
+                status = f"Update v{version} ready"
+                if FROZEN and self.settings.get("install_updates", True):
+                    if self.pending_update != downloaded:
+                        self.pending_update = downloaded
+                        self.root.after(500, self.install_when_idle, downloaded)
+                else:
+                    status += " · Open downloads folder to find the ZIP"
             elif error:
                 status = f"Update v{version} · {error}"
             self.update_status.set(status)
             self.version_label.set(f"{APP_NAME} · v{VERSION}" + (f" · Update v{version}" if is_update(version) else ""))
 
         self.root.after(100, poll)
+
+    def open_downloads(self):
+        try:
+            os.startfile(downloads_directory())
+        except OSError as error:
+            self.update_status.set(f"Could not open downloads · {error}")
+
+    def install_when_idle(self, downloaded, idle_since=None):
+        if self.closing or self.pending_update != downloaded:
+            return
+        version, archive, digest = downloaded
+        if not self.settings.get("install_updates", True):
+            self.pending_update = None
+            self.update_status.set(f"Update v{version} ready · Open downloads folder to find the ZIP")
+            return
+        now = time.monotonic()
+        fishing = self.fishing_state in {FishingState.VERIFYING, FishingState.ACTIVE}
+        if fishing or self.testing_bobber or self.busy or self.rebinding:
+            self.update_status.set(f"Update v{version} ready · waiting for fishing or calibration to finish")
+            self.root.after(1000, self.install_when_idle, downloaded)
+            return
+        idle_since = now if idle_since is None else idle_since
+        if now - idle_since < 3:
+            self.root.after(1000, self.install_when_idle, downloaded, idle_since)
+            return
+        if self.detection is not None and not self.detection.done():
+            self.detect_stop.set()
+            self.root.after(250, self.install_when_idle, downloaded, idle_since)
+            return
+        self.pending_update = None
+        self.update_status.set(f"Installing v{version} · Bobber Buddy will restart")
+        try:
+            self.save_settings()
+            start_installer(version, archive, digest)
+        except OSError as error:
+            self.update_status.set(f"Could not start the update · {error}")
+            return
+        self.close(for_update=True)
 
     def open_settings(self, section="Fishing"):
         dialog = tk.Toplevel(self.root)
@@ -499,9 +549,12 @@ class Calibration:
                    command=self.seed_map.open_waypoints).pack(fill="x")
         preference("Updates", "Check GitHub for updates on launch", "check_updates")
         preference("Updates", "Download verified updates automatically", "download_updates")
+        preference("Updates", "Install updates and restart when idle", "install_updates")
         ttk.Label(tabs["Updates"], textvariable=self.version_label).pack(anchor="w")
         ttk.Label(tabs["Updates"], textvariable=self.update_status).pack(anchor="w", pady=4)
-        ttk.Button(tabs["Updates"], text="Check for updates now", command=self.check_updates).pack(fill="x")
+        ttk.Button(tabs["Updates"], text="Check for updates now",
+                   command=lambda: self.check_updates(retry_failed=True)).pack(fill="x")
+        ttk.Button(tabs["Updates"], text="Open downloads folder", command=self.open_downloads).pack(fill="x")
         ttk.Button(tabs["Updates"], text="View release notes",
                    command=lambda: webbrowser.open(RELEASE_NOTES_URL)).pack(fill="x")
 
@@ -1207,7 +1260,7 @@ class Calibration:
         pending.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
         pending.replace(SETTINGS)
 
-    def close(self):
+    def close(self, *, for_update=False):
         if self.closing:
             return
         self.closing = True
@@ -1231,13 +1284,13 @@ class Calibration:
         except OSError as error:
             messagebox.showerror("Session could not be saved", str(error))
         finally:
-            self.seed_map.close()
+            self.seed_map.close(wait=for_update)
             self.zoom_keys.close()
             self.hotkeys.close()
             self.root.withdraw()
             self.fishing_indicator.hide()
             self.gps_indicator.hide()
-            if self.settings.get("fishing_notifications", True):
+            if not for_update and self.settings.get("fishing_notifications", True):
                 self.show_fishing_status(FishingState.INACTIVE, on_finished=self.root.destroy)
             else:
                 self.root.destroy()
@@ -1296,5 +1349,14 @@ if __name__ == "__main__":
         raise SystemExit
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("BobberBuddy.Desktop")
     root = tk.Tk()
-    Calibration(root)
+    app = Calibration(root)
+    if FROZEN and len(sys.argv) == 3 and sys.argv[1] == "--update-ready":
+        def confirm_open():
+            if root.winfo_viewable():
+                Path(sys.argv[2]).write_text(VERSION, encoding="ascii")
+                app.update_status.set(f"Updated to v{VERSION}")
+            else:
+                root.after(100, confirm_open)
+
+        root.after(150, confirm_open)
     root.mainloop()
