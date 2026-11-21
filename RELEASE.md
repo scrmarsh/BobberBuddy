@@ -1,25 +1,22 @@
-# Bobber Buddy v1.0.1
+# Bobber Buddy v1.0.2
 
 ## Release notes
 
-- First public Windows download. Extract the entire x64 ZIP, then open **Bobber Buddy.exe**.
-- Update checks and download links use the renamed [BobberBuddy repository](https://github.com/scrmarsh/BobberBuddy).
-- Bobber Buddy branding, an embedded Windows icon and version, and a portable x64 executable.
-- Fishing states beneath the crosshair with optional transition notifications. The existing detector and two-stage rod verification still control fishing.
-- Persistent minimap settings, in-game and desktop views, and remembered desktop window geometry.
-- World-scoped waypoints and compass GPS with straight-line distances, arrival detection, and a map route.
-- Asynchronous checks for the latest stable GitHub release and optional SHA-256-verified background downloads.
+- Bedrock auto-fishing starts on a clean profile with bundled rod and bobber references. The hotbar matcher ignores the durability meter for both bundled and learned rods.
+- Vibrant Visuals support adds three small bobber crops, improves detection of shaded and reflective water, and recognizes a splash when a locked bobber submerges.
+- The optional minimap saves named seeds, exposes filters during the Escape menu, and offers a browser fallback if its embedded view fails to start.
+- Extract the Windows x64 ZIP and open **Bobber Buddy.exe**. [Release and SHA-256 download](https://github.com/scrmarsh/BobberBuddy/releases/tag/v1.0.2)
 
 ## Build and review
 
 Run `python -m pip install -r requirements-build.txt`, `python -m unittest discover -s tests`, and `python build_release.py` from a Windows x64 checkout. The build creates the portable bundle, ZIP, and SHA-256 file in `dist`. The GitHub Actions workflow builds artifacts for review.
 
-GitHub Releases hosts the portable ZIP and its SHA-256 checksum. For each release, use a tag matching the app version (for example, `v1.0.1`) and attach the assets built from that revision.
+GitHub Releases hosts the portable ZIP and its SHA-256 checksum. For each release, use a tag matching the app version and attach the assets built from that revision.
 
 ## Architecture and known limits
 
 - Tkinter owns settings, overlays, and control state. OpenCV and MSS handle bobber, hotbar, and held-rod detection. A separate WebView2 process hosts Chunk Base and uses Windows OCR for shared coordinates.
-- The portable package includes a starter bobber template. Calibrate with the installed resource pack and capture a custom template if needed.
-- Navigation follows the configured dimension and uses a straight line. The in-game overlay is click-through. Use the separate map for keyboard and pointer interaction. Escape-menu expansion and navigation from Chunk Base search results require further integration.
+- Java Edition requires rod calibration. Capture a custom template or learn the rod if a resource pack or enchantment changes its appearance.
+- Navigation follows the configured dimension and uses a straight line. The in-game map is click-through during gameplay and accepts pointer input in the pause menu. Use the separate map for keyboard navigation.
 - Verified downloads are saved locally. This release uses an unsigned portable executable and updates are installed manually.
-- Before publication, exercise the package on clean Windows 10 and 11, test scaling and a disconnected second display, verify fishing and status transitions in a fresh session, check waypoint persistence, and verify map geometry and live navigation through a teleport.
+- Validation covered 21 automated tests, startup from an empty profile, live casting and bobber tracking in a Bedrock pond with Vibrant Visuals, and replay of a recorded splash. A complete live catch and recast with Vibrant Visuals remains unverified.

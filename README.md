@@ -4,6 +4,8 @@ Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It
 
 **[Download Bobber Buddy for Windows](https://github.com/scrmarsh/BobberBuddy/releases/latest)**
 
+Latest release **v1.0.2** adds first-run Bedrock auto-fishing with bundled references for both standard rendering and Vibrant Visuals.
+
 ## What it does
 
 - Detects a bobber dip and uses approaching bubbles as an additional bite cue.
@@ -16,13 +18,13 @@ Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It
 
 Download the Windows x64 ZIP, extract all its files, and open **Bobber Buddy.exe**. The package targets Windows 10 and 11 and includes Python.
 
-In Bedrock Edition with the default textures, open the app, equip your rod, and aim at open water. Bobber Buddy loads bundled bobber and rod references and scans around the crosshair automatically. If it cannot confirm the rod is ready to cast, cast the first line yourself. Use **F10** to toggle auto-fishing or **F9** to stop it immediately.
+In Bedrock Edition with the default textures, open the app, equip your rod, and aim at open water. Bobber Buddy starts scanning automatically on a clean profile and ignores the rod's durability meter. If it cannot confirm the rod is ready to cast, cast the first line yourself. Use **F10** to toggle auto-fishing or **F9** to stop it immediately.
 
 ### Calibrate for Java or custom textures
 
 1. Select your edition. In Minecraft, cast into your fishing spot and keep the camera still. Windowed or borderless mode works best.
 2. In **Calibrate**, choose your game monitor and click **Capture screen (4s)**. Return to Minecraft before the capture, then draw a small search region around the bobber and nearby water. If the bundled template struggles, select just the bobber, click **Use region as template**, then redraw the wider search region.
-3. In **Calibrate**, click **Learn rod (4s)**. Return to Minecraft with the rod selected and visible in first person. In the captured image, draw a tight box around the reel and handle.
+3. In **Calibrate**, click **Learn rod (4s)**. Return to Minecraft with the rod selected and visible in first person. In the captured image, draw a tight box around the reel and handle. Use the same control to capture an enchanted rod if the default reference does not match it.
 4. Use **Test bobber** to check tracking, or press **F10** to toggle auto-fishing. **F9** is the emergency stop. Both keys can be changed in the app.
 
 If a spot gives false bites or fails to track the float, use **Sample region (12s)** in **Calibrate** and review the replay. Adjust **Minimum match score** so the real bobber is detected more reliably than empty water. Recalibrate when the saved screen region no longer lines up with your fishing spot.
