@@ -117,21 +117,23 @@ class FishingDefaultsTests(unittest.TestCase):
         matcher.find.return_value = None
         self.assertTrue(detector.update(splash, 2).bite)
 
-    def test_vibrant_bobber_variant_stands_out_in_dark_water(self):
-        vibrant = ASSETS / "bedrock-vibrant-bobber.png"
-        reference = cv2.imread(str(vibrant), cv2.IMREAD_UNCHANGED)
-        box = cv2.boundingRect(reference[:, :, 3])
-        x, y, width, height = box
-        target = reference[y:y + height, x:x + width]
+    def test_vibrant_bobber_variants_stand_out_in_water(self):
+        variants = ((ASSETS / "bedrock-vibrant-bobber.png", 0.89),
+                    (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91))
+        detector = Matcher(ASSETS / "bedrock-bobber.png", variants=variants)
         empty = np.full((60, 90, 3), (37, 42, 23), dtype=np.uint8)
-        frame = empty.copy()
-        region = frame[18:18 + height, 32:32 + width]
-        region[target[:, :, 3] > 0] = target[:, :, :3][target[:, :, 3] > 0]
-        detector = Matcher(ASSETS / "bedrock-bobber.png", variants=((vibrant, 0.89),))
         self.assertLess(detector.find(empty).score, 0.82)
-        match = detector.find(frame)
-        self.assertGreater(match.score, 0.95)
-        self.assertEqual(match.box, (32, 18, 32 + width, 18 + height))
+        for reference_path, _ in variants:
+            with self.subTest(reference=reference_path.name):
+                reference = cv2.imread(str(reference_path), cv2.IMREAD_UNCHANGED)
+                x, y, width, height = cv2.boundingRect(reference[:, :, 3])
+                target = reference[y:y + height, x:x + width]
+                frame = empty.copy()
+                region = frame[18:18 + height, 32:32 + width]
+                region[target[:, :, 3] > 0] = target[:, :, :3][target[:, :, 3] > 0]
+                match = detector.find(frame)
+                self.assertGreater(match.score, 0.95)
+                self.assertEqual(match.box, (32, 18, 32 + width, 18 + height))
 
     def test_first_cast_checks_vibrant_water_at_crosshair(self):
         warm_stone = (16, 100, 125)

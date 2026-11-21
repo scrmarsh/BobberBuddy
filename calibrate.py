@@ -45,10 +45,11 @@ def default_template(edition):
 
 
 def fishing_matcher(edition, path):
-    vibrant = ASSETS / "bedrock-vibrant-bobber.png"
     variants = ()
-    if edition == "bedrock" and path == default_template(edition) and vibrant.is_file():
-        variants = ((vibrant, 0.89),)
+    if edition == "bedrock" and path == default_template(edition):
+        variants = ((ASSETS / "bedrock-vibrant-bobber.png", 0.89),
+                    (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91))
+        variants = tuple((reference, minimum) for reference, minimum in variants if reference.is_file())
     return Matcher(path, variants=variants)
 
 
@@ -1242,6 +1243,7 @@ if __name__ == "__main__":
         try:
             Matcher(ASSETS / "bedrock-bobber.png")
             Matcher(ASSETS / "bedrock-vibrant-bobber.png")
+            Matcher(ASSETS / "bedrock-vibrant-lit-bobber.png")
             Matcher(ASSETS / "java-bobber.png")
             hotbar = cv2.imread(str(ASSETS / "bedrock-hotbar-rod.png"))
             muted = cv2.imread(str(ASSETS / "bedrock-muted-rod.png"))
