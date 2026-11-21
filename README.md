@@ -4,7 +4,7 @@ Bobber Buddy is an unofficial Windows fishing companion for Minecraft Java and B
 
 ## Install on Windows
 
-Extract the entire Windows x64 release ZIP and open **Bobber Buddy.exe**. Keep the executable and its supporting files together. No Python installation is needed. The package targets Windows 10 and 11. The map requires Microsoft Edge WebView2 Runtime, Windows OCR language support, and an internet connection. Fishing works offline after calibration.
+Download the Windows x64 ZIP from [GitHub Releases](https://github.com/scrmarsh/BobberBuddy/releases/latest), extract it, and open **Bobber Buddy.exe**. Keep the executable and its supporting files together. No Python installation is needed. The package targets Windows 10 and 11. The map requires Microsoft Edge WebView2 Runtime, Windows OCR language support, and an internet connection. Fishing works offline after calibration.
 
 Packaged settings, custom reference images, waypoints, and session logs live in `%LOCALAPPDATA%\Bobber Buddy`. Source checkouts use `.local`.
 

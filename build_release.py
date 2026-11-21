@@ -1,4 +1,5 @@
 """Build a portable Windows bundle and its SHA-256 checksum."""
+import argparse
 import hashlib
 import shutil
 from pathlib import Path
@@ -10,9 +11,11 @@ from app_info import APP_NAME, ASSETS, ROOT, VERSION
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dist-dir", type=Path, default=ROOT / "dist")
+    dist = parser.parse_args().dist_dir.resolve()
     stage = ROOT / "build" / "release-assets"
     stage.mkdir(parents=True, exist_ok=True)
-    dist = ROOT / "dist"
     icon = stage / "bobber.ico"
     with Image.open(ASSETS / "night-fishing-bobber.png") as image:
         image.save(icon, sizes=[(32, 32), (48, 48), (256, 256)])

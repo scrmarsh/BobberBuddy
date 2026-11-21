@@ -52,7 +52,7 @@ class UpdateTests(unittest.TestCase):
     def test_stable_version(self, get):
         get.return_value.__enter__.return_value = StringIO('{"tag_name": "v2.0.0"}')
         self.assertTrue(is_update(latest_version()))
-        self.assertIn("/repos/scrmarsh/Bobber-Buddy/releases/latest", get.call_args.args[0].full_url)
+        self.assertIn("/repos/scrmarsh/BobberBuddy/releases/latest", get.call_args.args[0].full_url)
 
     @patch("updates.urlopen")
     def test_prerelease_is_ignored(self, get):
@@ -62,7 +62,7 @@ class UpdateTests(unittest.TestCase):
     @patch("updates.urlopen")
     def test_download_verifies_before_installation(self, get):
         body = b"bundle"
-        url = "https://github.com/scrmarsh/Bobber-Buddy/releases/download/v2.0.0/Bobber-Buddy-v2.0.0-Windows-x64.zip"
+        url = "https://github.com/scrmarsh/BobberBuddy/releases/download/v2.0.0/Bobber-Buddy-v2.0.0-Windows-x64.zip"
         asset = dict(name=url.rsplit("/", 1)[1], browser_download_url=url,
                      digest=f"sha256:{hashlib.sha256(body).hexdigest()}", size=len(body))
         response = BytesIO(body)
