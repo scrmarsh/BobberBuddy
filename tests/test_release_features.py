@@ -18,7 +18,7 @@ from hotbar import HotbarRod
 from matcher import Match, Matcher
 from navigation import guidance, world_key
 from seed_map import SeedMap, map_displays, map_url, numeric_map_seed
-from seed_map_view import PauseMap, editing_box
+from seed_map_view import PauseMap, editing_box, show_route
 from updates import download_release, is_update, latest_version
 
 
@@ -36,6 +36,13 @@ class NavigationTests(unittest.TestCase):
 
 
 class MapTests(unittest.TestCase):
+    @patch("seed_map_view.execute")
+    def test_route_update_can_render_after_coordinate_read(self, execute):
+        show_route(Mock(), (3, -4), {"waypoints": {"Home": [3, -4]}})
+        script = execute.call_args.args[1]
+        self.assertIn("width:100%;height:100%", script)
+        self.assertIn('"Home": [3, -4]', script)
+
     def test_text_seed_is_sent_as_the_signed_minecraft_seed(self):
         config = dict(seed="IV", edition="bedrock", version="26.60–26.65", dimension="Overworld", x=None, z=None)
         self.assertEqual(numeric_map_seed("IV"), "2349")
@@ -106,6 +113,27 @@ class MapTests(unittest.TestCase):
 
 
 class FishingDefaultsTests(unittest.TestCase):
+    def test_recast_survives_a_brief_hotbar_drop_during_reel(self):
+        bounds = dict(left=0, top=0, width=1280, height=720)
+        game = Mock(identity=(1, 2))
+        game.movement_pressed.return_value = False
+        rod = Mock()
+        rod.matches.side_effect = [True, True, False, False] + [True] * 30
+        stop = Mock()
+        stop.is_set.side_effect = [False] * 12 + [True]
+        detector = Mock(stable=4)
+        detector.update.side_effect = [FishingFrame(None, bite=True)] + [FishingFrame(None)] * 20
+        frames = deque(maxlen=12)
+        with (patch("calibrate.mss.MSS") as capture,
+              patch("calibrate.client_area", return_value=bounds),
+              patch("calibrate.read_selected_slot"),
+              patch("calibrate.water_in_cast_area", return_value=True),
+              patch("calibrate.time.monotonic", side_effect=count(1, 0.12))):
+            capture.return_value.__enter__.return_value.grab.return_value = np.zeros((64, 64, 4), dtype=np.uint8)
+            result = watch(None, detector, game, True, stop, frames, rod, Mock())
+        self.assertEqual((result.reels, result.recasts), (1, 1))
+        self.assertTrue(any(not frame.rod_selected for frame in frames))
+
     def test_automatic_cast_waits_for_stationary_rod_and_water(self):
         bounds = dict(left=0, top=0, width=1280, height=720)
         for moving, equipped, water, expected in (

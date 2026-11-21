@@ -49,10 +49,12 @@ def read_selected_slot(screen, hwnd, *, muted=False):
 
 
 class HotbarRod:
-    def __init__(self, reference, muted_reference=None):
+    def __init__(self, reference, muted_reference=None, *, extra_references=()):
         self.reference = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
         self.muted_reference = (cv2.cvtColor(muted_reference, cv2.COLOR_BGR2GRAY)
                                 if muted_reference is not None else None)
+        self.extra_references = tuple(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                                      for image in extra_references)
 
     def matches(self, slot, *, muted=False):
         if slot is None:
@@ -60,7 +62,7 @@ class HotbarRod:
         gray = cv2.cvtColor(slot, cv2.COLOR_BGR2GRAY)
         # Exclude the slot border and the changing durability bar for every rod.
         gray = gray[4:32, 4:38]
-        references = (self.reference,)
+        references = (self.reference, *self.extra_references)
         if muted:
             # The alternate highlight can move the slot crop by a few pixels.
             gray = cv2.copyMakeBorder(gray, 3, 3, 3, 3, cv2.BORDER_REPLICATE)

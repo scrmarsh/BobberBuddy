@@ -50,7 +50,8 @@ def fishing_matcher(edition, path):
     if edition == "bedrock" and path == default_template(edition):
         variants = ((ASSETS / "bedrock-vibrant-bobber.png", 0.89),
                     (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91),
-                    (ASSETS / "bedrock-vibrant-level-bobber.png", 0.92))
+                    (ASSETS / "bedrock-vibrant-level-bobber.png", 0.92),
+                    (ASSETS / "bedrock-ocean-bobber.png", 0.84))
         variants = tuple((reference, minimum) for reference, minimum in variants if reference.is_file())
     return Matcher(path, variants=variants)
 
@@ -234,10 +235,11 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                 detector.reset()
                 event = FishingFrame(None, waiting="Stand still to resume fishing.")
             elif auto_reel and not rod_selected():
-                recast_at = None
                 clear_since = None
                 cast_armed = True
                 detector.reset()
+                if recast_at is not None and now > recast_at + RECAST_GRACE:
+                    recast_at = None
                 event = FishingFrame(None, rod_selected=False)
             elif auto_reel and not rod_visible():
                 clear_since = None
@@ -623,7 +625,6 @@ class Calibration:
         card = tk.Frame(self.menu, background=CARD, highlightbackground="#28505c", highlightthickness=1)
         card.grid(row=1, column=0, sticky="nsew", padx=(0, 14))
         art_path = ART if ART.is_file() else ART.with_name("night-fishing-bobber.png")
-        self.fishing_popup = FishingStatusPopup(self.root, art_path)
         self.fishing_indicator = FishingStatusPopup(self.root, art_path)
         self.gps_indicator = FishingStatusPopup(self.root, art_path)
         with Image.open(art_path) as image:
@@ -842,7 +843,10 @@ class Calibration:
             alternate_path = ASSETS / f"{self.key}-muted-rod.png"
             alternate = (cv2.imread(str(alternate_path))
                          if path.parent == ASSETS and alternate_path.is_file() else None)
-            rod = HotbarRod(reference, alternate)
+            windowed_path = ASSETS / f"{self.key}-windowed-rod.png"
+            windowed = (cv2.imread(str(windowed_path))
+                        if path.parent == ASSETS and windowed_path.is_file() else None)
+            rod = HotbarRod(reference, alternate, extra_references=() if windowed is None else (windowed,))
             uncast_path = self.rod_reference("uncast")
             if uncast_path.is_file():
                 try:
@@ -879,7 +883,7 @@ class Calibration:
             area = dict(left=0, top=0, width=self.root.winfo_screenwidth(),
                         height=self.root.winfo_screenheight())
         try:
-            self.fishing_popup.show(state, area, on_finished, notification=self.settings.get("crosshair_status", True))
+            self.fishing_indicator.show(state, area, on_finished)
         except (OSError, tk.TclError):
             if on_finished is not None:
                 on_finished()
@@ -891,7 +895,11 @@ class Calibration:
         if state in {FishingState.VERIFYING, FishingState.ACTIVE}:
             self.indicator_last_used = time.monotonic()
         if self.settings.get("fishing_notifications", True) and state != FishingState.VERIFYING:
-            self.show_fishing_status(state)
+            if self.settings.get("crosshair_status", True) and self.status_game.foreground_game():
+                self.indicator_last_used = time.monotonic()
+            else:
+                self.indicator_state = None
+                self.show_fishing_status(state)
 
     def refresh_fishing_indicator(self):
         hwnd = self.status_game.foreground_game() if self.status_game.edition == self.key else None
@@ -1343,6 +1351,7 @@ if __name__ == "__main__":
             Matcher(ASSETS / "bedrock-vibrant-bobber.png")
             Matcher(ASSETS / "bedrock-vibrant-lit-bobber.png")
             Matcher(ASSETS / "bedrock-vibrant-level-bobber.png")
+            Matcher(ASSETS / "bedrock-ocean-bobber.png")
             Matcher(ASSETS / "java-bobber.png")
             hotbar = cv2.imread(str(ASSETS / "bedrock-hotbar-rod.png"))
             muted = cv2.imread(str(ASSETS / "bedrock-muted-rod.png"))

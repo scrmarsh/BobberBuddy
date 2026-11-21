@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 APP_NAME = "Bobber Buddy"
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 UPDATER_NAME = "Bobber Buddy Updater"
 RELEASE_REPOSITORY = "scrmarsh/BobberBuddy"
 ROOT = Path(__file__).resolve().parent

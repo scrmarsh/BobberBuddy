@@ -223,7 +223,7 @@ def show_route(window, position, route):
             if (!layer) {
                 layer = document.createElementNS('http://www.w3.org/2000/svg','svg');
                 layer.dataset.bobberRoute = '';
-                layer.setAttribute('style','position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:20');
+                layer.setAttribute('style','position:absolute;inset:0;width:100%%;height:100%%;pointer-events:none;z-index:20');
                 map.append(layer);
             }
             const data = %s;
