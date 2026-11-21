@@ -115,9 +115,13 @@ def water_in_cast_area(frame):
     height, width = teal.shape
     aim = teal[height * 3 // 8:height * 5 // 8, width * 3 // 8:width * 5 // 8]
     foreground = teal[height // 2:, width // 4:width * 3 // 4]
-    return (aim.size > 0 and foreground.size > 0
-            and cv2.countNonZero(aim) >= aim.size * 0.72
-            and cv2.countNonZero(foreground) >= foreground.size * 0.60)
+    if not aim.size or not foreground.size:
+        return False
+    aim_coverage = cv2.countNonZero(aim) / aim.size
+    foreground_coverage = cv2.countNonZero(foreground) / foreground.size
+    # Strong foreground coverage permits a reflection over part of the aim area.
+    return ((aim_coverage >= 0.72 and foreground_coverage >= 0.60)
+            or (aim_coverage >= 0.20 and foreground_coverage >= 0.82))
 
 
 def capture(area, matcher, stop, threshold=None):
@@ -251,7 +255,12 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                                                recasts=recasts, casts=casts))
                     stop.wait(INTERVAL)
                     continue
-                event = replace(detector.update(frame, now), locked=detector.stable >= 4)
+                acquisition_region = None
+                if automatic:
+                    height, width = frame.shape[:2]
+                    acquisition_region = (width // 5, height // 6, width * 4 // 5, height * 5 // 6)
+                event = replace(detector.update(frame, now, acquisition_region=acquisition_region),
+                                locked=detector.stable >= 4)
                 if auto_reel:
                     float_visible = event.locked or (event.match is not None and event.match.score >= detector.threshold)
                     recovery_ready = uncast_rod is not None and now - last_cast_attempt >= 5

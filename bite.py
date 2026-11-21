@@ -45,7 +45,7 @@ class BiteDetector:
         self.float_red_pixels = 0
         self.faded_frames = 0
 
-    def update(self, frame, now):
+    def update(self, frame, now, *, acquisition_region=None):
         previous = self.previous
         self.previous = frame
         if previous is not None:
@@ -56,7 +56,7 @@ class BiteDetector:
                 previous = None
 
         if self.anchor is None:
-            hit = self.matcher.find(frame)
+            hit = self.matcher.find(frame, acquisition_region)
             if hit and hit.score >= self.threshold:
                 self.anchor = hit.box
                 self.stable = 1

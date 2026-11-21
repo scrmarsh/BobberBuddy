@@ -142,6 +142,9 @@ class FishingDefaultsTests(unittest.TestCase):
         pond = np.full((80, 120, 3), warm_stone, dtype=np.uint8)
         pond[26:, 20:100] = dark_teal_water
         self.assertTrue(water_in_cast_area(cv2.cvtColor(pond, cv2.COLOR_HSV2BGR)))
+        reflected = pond.copy()
+        reflected[29:46, 43:77] = warm_stone
+        self.assertTrue(water_in_cast_area(cv2.cvtColor(reflected, cv2.COLOR_HSV2BGR)))
         pond[29:51, 43:77] = warm_stone
         self.assertFalse(water_in_cast_area(cv2.cvtColor(pond, cv2.COLOR_HSV2BGR)))
         classic = np.full_like(pond, (100, 150, 125))
