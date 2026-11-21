@@ -48,7 +48,8 @@ def fishing_matcher(edition, path):
     variants = ()
     if edition == "bedrock" and path == default_template(edition):
         variants = ((ASSETS / "bedrock-vibrant-bobber.png", 0.89),
-                    (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91))
+                    (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91),
+                    (ASSETS / "bedrock-vibrant-level-bobber.png", 0.92))
         variants = tuple((reference, minimum) for reference, minimum in variants if reference.is_file())
     return Matcher(path, variants=variants)
 
@@ -173,8 +174,7 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                 hwnd = game.identity[0]
                 if rod.matches(read_selected_slot(screen, hwnd)):
                     return True
-                return (rod.muted_reference is not None
-                        and rod.matches(read_selected_slot(screen, hwnd, muted=True), muted=True))
+                return rod.matches(read_selected_slot(screen, hwnd, muted=True), muted=True)
             except mss.ScreenShotError:
                 return False
 
@@ -1244,6 +1244,7 @@ if __name__ == "__main__":
             Matcher(ASSETS / "bedrock-bobber.png")
             Matcher(ASSETS / "bedrock-vibrant-bobber.png")
             Matcher(ASSETS / "bedrock-vibrant-lit-bobber.png")
+            Matcher(ASSETS / "bedrock-vibrant-level-bobber.png")
             Matcher(ASSETS / "java-bobber.png")
             hotbar = cv2.imread(str(ASSETS / "bedrock-hotbar-rod.png"))
             muted = cv2.imread(str(ASSETS / "bedrock-muted-rod.png"))

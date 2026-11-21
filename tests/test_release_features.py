@@ -119,7 +119,8 @@ class FishingDefaultsTests(unittest.TestCase):
 
     def test_vibrant_bobber_variants_stand_out_in_water(self):
         variants = ((ASSETS / "bedrock-vibrant-bobber.png", 0.89),
-                    (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91))
+                    (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91),
+                    (ASSETS / "bedrock-vibrant-level-bobber.png", 0.92))
         detector = Matcher(ASSETS / "bedrock-bobber.png", variants=variants)
         empty = np.full((60, 90, 3), (37, 42, 23), dtype=np.uint8)
         self.assertLess(detector.find(empty).score, 0.82)
@@ -156,6 +157,9 @@ class FishingDefaultsTests(unittest.TestCase):
         for rod, muted in ((learned, False), (bundled, False), (bundled, True)):
             self.assertTrue(rod.matches(slot, muted=muted))
             self.assertFalse(rod.matches(cv2.rotate(slot, cv2.ROTATE_90_CLOCKWISE), muted=muted))
+        offset = np.float32([[1, 0, 2], [0, 1, -2]])
+        shifted = cv2.warpAffine(slot, offset, (40, 40), borderMode=cv2.BORDER_REPLICATE)
+        self.assertTrue(learned.matches(shifted, muted=True))
 
     def test_search_is_centered_and_capped_at_common_resolutions(self):
         for width, height in ((1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)):

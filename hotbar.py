@@ -55,11 +55,16 @@ class HotbarRod:
                                 if muted_reference is not None else None)
 
     def matches(self, slot, *, muted=False):
-        reference = self.muted_reference if muted else self.reference
-        if slot is None or reference is None:
+        if slot is None:
             return False
         gray = cv2.cvtColor(slot, cv2.COLOR_BGR2GRAY)
         # Exclude the slot border and the changing durability bar for every rod.
         gray = gray[4:32, 4:38]
-        reference = reference[4:32, 4:38]
-        return cv2.matchTemplate(gray, reference, cv2.TM_CCOEFF_NORMED).item() >= 0.84
+        references = (self.reference,)
+        if muted:
+            # The alternate highlight can move the slot crop by a few pixels.
+            gray = cv2.copyMakeBorder(gray, 3, 3, 3, 3, cv2.BORDER_REPLICATE)
+            if self.muted_reference is not None:
+                references += (self.muted_reference,)
+        return any(cv2.matchTemplate(gray, reference[4:32, 4:38], cv2.TM_CCOEFF_NORMED).max() >= 0.84
+                   for reference in references)
