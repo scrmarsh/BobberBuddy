@@ -1,6 +1,8 @@
 import unittest
 import hashlib
 import json
+from collections import deque
+from itertools import count
 from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,12 +12,12 @@ import cv2
 import numpy as np
 
 from app_info import ASSETS
-from bite import BiteDetector
-from calibrate import automatic_capture_area, water_in_cast_area
+from bite import BiteDetector, FishingFrame
+from calibrate import Calibration, automatic_capture_area, watch, water_in_cast_area
 from hotbar import HotbarRod
 from matcher import Match, Matcher
 from navigation import guidance, world_key
-from seed_map import SeedMap, map_displays, map_url
+from seed_map import SeedMap, map_displays, map_url, numeric_map_seed
 from seed_map_view import PauseMap, editing_box
 from updates import download_release, is_update, latest_version
 
@@ -34,6 +36,13 @@ class NavigationTests(unittest.TestCase):
 
 
 class MapTests(unittest.TestCase):
+    def test_text_seed_is_sent_as_the_signed_minecraft_seed(self):
+        config = dict(seed="IV", edition="bedrock", version="26.60–26.65", dimension="Overworld", x=None, z=None)
+        self.assertEqual(numeric_map_seed("IV"), "2349")
+        self.assertIn("seed=2349&", map_url(config))
+        self.assertEqual(config["seed"], "IV")
+        self.assertEqual(numeric_map_seed("-9223372036854775808"), "-9223372036854775808")
+
     def test_named_seed_persists_without_switching_the_current_map(self):
         active = {"seed": "27", "enabled": False, "mode": "overlay"}
         settings = {"seed_map": active}
@@ -97,6 +106,44 @@ class MapTests(unittest.TestCase):
 
 
 class FishingDefaultsTests(unittest.TestCase):
+    def test_automatic_cast_waits_for_stationary_rod_and_water(self):
+        bounds = dict(left=0, top=0, width=1280, height=720)
+        for moving, equipped, water, expected in (
+            (False, True, True, 1), (True, True, True, 0),
+            (False, False, True, 0), (False, True, False, 0),
+        ):
+            with self.subTest(moving=moving, equipped=equipped, water=water):
+                game = Mock(identity=(1, 2))
+                game.movement_pressed.return_value = moving
+                rod = Mock()
+                rod.matches.return_value = equipped
+                stop = Mock()
+                stop.is_set.side_effect = [False] * 30 + [True]
+                detector = Mock(stable=0)
+                detector.update.return_value = FishingFrame(None)
+                frames = deque(maxlen=30)
+                with (patch("calibrate.mss.MSS") as capture,
+                      patch("calibrate.client_area", return_value=bounds),
+                      patch("calibrate.read_selected_slot"),
+                      patch("calibrate.water_in_cast_area", return_value=water),
+                      patch("calibrate.time.monotonic", side_effect=count(1, 0.2))):
+                    capture.return_value.__enter__.return_value.grab.return_value = np.zeros((64, 64, 4), dtype=np.uint8)
+                    result = watch(None, detector, game, True, stop, frames, rod, Mock())
+                self.assertEqual(result.casts, expected)
+                self.assertEqual(game.use_rod.call_count, expected)
+
+    def test_indicator_fades_after_five_seconds_of_standby(self):
+        app = Mock(key="bedrock", settings={}, indicator_last_used=10, indicator_state=None)
+        app.status_game.edition = app.key
+        with patch("calibrate.client_area", return_value={"width": 800}), patch("calibrate.time.monotonic") as now:
+            now.return_value = 14.99
+            Calibration.refresh_fishing_indicator(app)
+            app.fishing_indicator.show.assert_called_once()
+            now.return_value = 15
+            Calibration.refresh_fishing_indicator(app)
+            Calibration.refresh_fishing_indicator(app)
+        app.fishing_indicator.fade_out.assert_called_once()
+
     def test_splash_at_locked_bobber_requires_submersion(self):
         water = np.full((100, 120, 3), (38, 43, 26), dtype=np.uint8)
         floating = water.copy()

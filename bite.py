@@ -20,6 +20,7 @@ class FishingFrame:
     locked: bool = False
     rod_selected: bool = True
     rod_visible: bool = True
+    waiting: str = ""
 
 
 class BiteDetector:

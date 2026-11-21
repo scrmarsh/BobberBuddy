@@ -16,7 +16,7 @@ from coordinate_reader import CoordinateReader
 from app_info import ASSETS, DATA_DIR
 from navigation import guidance, world_key
 from game_window import MinecraftWindow, client_area
-from seed_map import APP_NAME, FULLSCREEN_MODES, MAP_ZOOM_COMMANDS, VERSIONS, map_url
+from seed_map import APP_NAME, FULLSCREEN_MODES, MAP_ZOOM_COMMANDS, VERSIONS, map_url, numeric_map_seed
 from status_popup import BORDER, EDGE, RADIUS, SURFACE, overlay_box
 
 
@@ -307,7 +307,7 @@ async def follow(views, config, stopping, zoom_requests=None, pause_requests=Non
     position_file = DATA_DIR / "player-position.json"
     selection_file = DATA_DIR / "map-destination.json"
     last_position_write = float("-inf")
-    expected = dict(seed=config["seed"], platform=VERSIONS[config["edition"]][config["version"]])
+    expected = dict(seed=numeric_map_seed(config["seed"]), platform=VERSIONS[config["edition"]][config["version"]])
     world_label = f"Chunk Base · {config['edition'].title()} {config['version']} · {config['dimension']}"
 
     def show_status(window, label, *, player_marker=False):
@@ -337,6 +337,11 @@ async def follow(views, config, stopping, zoom_requests=None, pause_requests=Non
                 if window.uid in initialized or not window.events.shown.is_set():
                     continue
                 actual = map_world(window)
+                if actual and actual["seed"].strip():
+                    try:
+                        actual["seed"] = numeric_map_seed(actual["seed"])
+                    except ValueError:
+                        continue
                 if actual == expected and execute(window, MINIMAP):
                     if overlay and not execute(window, OVERLAY_STYLE):
                         continue

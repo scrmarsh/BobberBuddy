@@ -6,6 +6,7 @@ import sys
 import time
 import tkinter as tk
 import webbrowser
+import winreg
 from pathlib import Path
 from tkinter import messagebox, simpledialog, ttk
 from urllib.parse import urlencode
@@ -70,6 +71,17 @@ def world_seed(value):
     return value
 
 
+def numeric_map_seed(value):
+    value = world_seed(value)
+    if re.fullmatch(r"-?[0-9]+", value):
+        return value
+    encoded = value.encode("utf-16-le", errors="surrogatepass")
+    result = 0
+    for index in range(0, len(encoded), 2):
+        result = (31 * result + int.from_bytes(encoded[index:index + 2], "little")) & 0xFFFFFFFF
+    return str(result if result < 2**31 else result - 2**32)
+
+
 def coordinate(value):
     value = str(value).strip()
     if not re.fullmatch(r"[+-]?\d{1,8}", value, flags=re.ASCII) or abs(int(value)) > 30_000_000:
@@ -83,7 +95,7 @@ def seed_profile(config):
 
 def map_url(config, *, overlay=False):
     center = dict(x=config["x"], z=config["z"]) if config["x"] is not None else {}
-    state = dict(seed=config["seed"], platform=VERSIONS[config["edition"]][config["version"]],
+    state = dict(seed=numeric_map_seed(config["seed"]), platform=VERSIONS[config["edition"]][config["version"]],
                  dimension=DIMENSIONS[config["dimension"]], zoom=0.42 if overlay else 0.55, **center)
     return f"{MAP_URL}#{urlencode(state)}"
 
@@ -110,6 +122,19 @@ def map_displays():
             return list(screen.monitors[1:])
     except (OSError, mss.ScreenShotError):
         return []
+
+
+def webview2_registered():
+    key = r"Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    for root, flags in ((winreg.HKEY_CURRENT_USER, 0), (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_32KEY)):
+        try:
+            with winreg.OpenKey(root, key, 0, winreg.KEY_READ | flags) as installed:
+                value, _ = winreg.QueryValueEx(installed, "pv")
+            if isinstance(value, str) and any(int(part) for part in value.split(".")):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
 
 
 class SeedMap:
@@ -448,9 +473,12 @@ class SeedMap:
             self.root.after(700, self.check_worker, process, url, remaining - 1)
         elif result:
             self.close()
+            detail = ("Windows could not find the Microsoft Edge WebView2 Runtime. Install the Evergreen Runtime."
+                      if not webview2_registered() else
+                      "The embedded map stopped unexpectedly. See the launch log for details.")
             if messagebox.askyesno("Minimap unavailable",
-                                   "The embedded map could not start. Check that Microsoft Edge WebView2 Runtime "
-                                   "is installed. Open the seed map in your browser instead?",
+                                   f"{detail}\n\nLaunch log: {self.log}\n\n"
+                                   "Open the seed map in your browser instead?",
                                    parent=self.root):
                 webbrowser.open(url)
 

@@ -15,6 +15,10 @@ ENUM_WINDOWS = ctypes.WINFUNCTYPE(win.BOOL, win.HWND, win.LPARAM)
 USER32.EnumWindows.argtypes = (ENUM_WINDOWS, win.LPARAM)
 USER32.GetClientRect.argtypes = (win.HWND, ctypes.POINTER(win.RECT))
 USER32.ClientToScreen.argtypes = (win.HWND, ctypes.POINTER(win.POINT))
+SET_DPI_CONTEXT = getattr(USER32, "SetThreadDpiAwarenessContext", None)
+if SET_DPI_CONTEXT is not None:
+    SET_DPI_CONTEXT.argtypes = (win.HANDLE,)
+    SET_DPI_CONTEXT.restype = win.HANDLE
 KERNEL32.OpenProcess.argtypes = (win.DWORD, win.BOOL, win.DWORD)
 KERNEL32.OpenProcess.restype = win.HANDLE
 KERNEL32.QueryFullProcessImageNameW.argtypes = (win.HANDLE, win.DWORD, win.LPWSTR, ctypes.POINTER(win.DWORD))
@@ -51,9 +55,14 @@ def process_id(hwnd):
 def client_area(hwnd):
     bounds = win.RECT()
     corner = win.POINT()
-    if not USER32.GetClientRect(hwnd, ctypes.byref(bounds)) or not USER32.ClientToScreen(hwnd, ctypes.byref(corner)):
-        return None
-    return dict(left=corner.x, top=corner.y, width=bounds.right, height=bounds.bottom)
+    previous = SET_DPI_CONTEXT(ctypes.c_void_p(-4)) if SET_DPI_CONTEXT is not None else None
+    try:
+        if not USER32.GetClientRect(hwnd, ctypes.byref(bounds)) or not USER32.ClientToScreen(hwnd, ctypes.byref(corner)):
+            return None
+        return dict(left=corner.x, top=corner.y, width=bounds.right, height=bounds.bottom)
+    finally:
+        if previous:
+            SET_DPI_CONTEXT(previous)
 
 
 class MinecraftWindow:
@@ -129,11 +138,16 @@ class MinecraftWindow:
         return (executable in {"java.exe", "javaw.exe"} and name.value in {"GLFW30", "LWJGL"}
                 and title.value.casefold().startswith("minecraft"))
 
+    def movement_pressed(self):
+        return any(USER32.GetAsyncKeyState(key) & 0x8000 for key in
+                   (0x57, 0x41, 0x53, 0x44, 0x20, 0x25, 0x26, 0x27, 0x28))
+
     def use_rod(self, stop):
         target = self.identity
         down = Input(0, MouseInput(flags=RIGHT_DOWN))
         up = Input(0, MouseInput(flags=RIGHT_UP))
         if (target is None or not self.focused() or target != self.identity or stop.is_set()
+                or self.movement_pressed()
                 or USER32.GetForegroundWindow() != target[0] or USER32.GetAsyncKeyState(0x02) & 0x8000):
             return False
         if USER32.SendInput(1, ctypes.byref(down), ctypes.sizeof(Input)) != 1:

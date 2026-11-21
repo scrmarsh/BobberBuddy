@@ -66,6 +66,8 @@ RECAST_DELAY = 0.9
 RECAST_GRACE = 1.25
 CAST_SETTLE = 1.4
 INITIAL_CAST_DELAY = 1.8
+MOVEMENT_SETTLE = 0.55
+INDICATOR_IDLE = 5
 BACKGROUND = "#101826"
 PANEL = "#192536"
 CARD = "#1d6177"
@@ -171,6 +173,7 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
     clear_since = None
     cast_armed = True
     last_cast_attempt = float("-inf")
+    movement_until = 0
     with mss.MSS() as screen:
         def rod_selected():
             if rod is None:
@@ -207,6 +210,8 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
             now = time.monotonic()
             event = FishingFrame(None)
             focused = game.focused()
+            if auto_reel and focused and game.movement_pressed():
+                movement_until = now + MOVEMENT_SETTLE
             if automatic:
                 next_area = automatic_capture_area(client_area(game.identity[0])) if focused else None
                 if area != next_area:
@@ -222,6 +227,12 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                 clear_since = None
                 detector.reset()
                 event = FishingFrame(None, watching=False)
+            elif auto_reel and now < movement_until:
+                recast_at = None
+                clear_since = None
+                cast_armed = True
+                detector.reset()
+                event = FishingFrame(None, waiting="Stand still to resume fishing.")
             elif auto_reel and not rod_selected():
                 recast_at = None
                 clear_since = None
@@ -238,13 +249,18 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
             elif recast_at is not None:
                 if now >= recast_at:
                     recast_at = None
-                    if game.identity == recast_target and use_verified_rod():
+                    try:
+                        water = water_in_cast_area(cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR))
+                    except mss.ScreenShotError:
+                        water = False
+                    if water and game.identity == recast_target and use_verified_rod():
                         recasts += 1
                         last_cast_attempt = now
                         settle_until = time.monotonic() + CAST_SETTLE
                     else:
                         cast_armed = True
                         clear_since = None
+                        event = replace(event, waiting="Aim at water to cast again.")
                     detector.reset()
             elif now >= settle_until:
                 try:
@@ -269,14 +285,19 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                         clear_since = None
                     if event.locked:
                         cast_armed = False
-                    if (not float_visible and (cast_armed or recovery_ready)
-                            and (not automatic or uncast_rod is not None)):
-                        if (not water_in_cast_area(frame)
-                                or (uncast_rod is not None and not stowed_hook_visible())):
+                    if not float_visible:
+                        if not water_in_cast_area(frame):
                             clear_since = None
+                            event = replace(event, waiting="Aim at visible water to cast.")
+                        elif not (cast_armed or recovery_ready):
+                            clear_since = None
+                            event = replace(event, waiting="Looking for the cast bobber.")
+                        elif uncast_rod is not None and not stowed_hook_visible():
+                            clear_since = None
+                            event = replace(event, waiting="Checking whether the line is already out.")
                         elif clear_since is None:
                             clear_since = now
-                        elif now - clear_since >= INITIAL_CAST_DELAY:
+                        elif now - clear_since >= (INITIAL_CAST_DELAY if uncast_rod else 3):
                             cast_armed = False
                             clear_since = None
                             last_cast_attempt = now
@@ -304,6 +325,8 @@ class Calibration:
         self.closing = False
         self.fishing_state = FishingState.INACTIVE
         self.indicator_state = None
+        self.indicator_last_used = float("-inf")
+        self.indicator_counts = (0, 0, 0)
         self.gps_state = None
         self.next_gps_read = 0
         if ICON.is_file():
@@ -340,6 +363,9 @@ class Calibration:
             edition: Path(self.settings.get("templates", {}).get(key, default_template(key)))
             for edition, key in EDITIONS.items()
         }
+        for edition, key in EDITIONS.items():
+            if not self.paths[edition].is_file():
+                self.paths[edition] = default_template(key)
         with mss.MSS() as screen:
             self.monitors = list(screen.monitors[1:])
         labels = [f"{i} · {m['width']}×{m['height']}" for i, m in enumerate(self.monitors, 1)]
@@ -825,6 +851,7 @@ class Calibration:
                     pass
         self.detect_stop.clear()
         self.matches.clear()
+        self.indicator_counts = (0, 0, 0)
         self.testing_bobber = test
         self.reeling = reeling
         if test:
@@ -861,6 +888,8 @@ class Calibration:
         if self.fishing_state == state:
             return
         self.fishing_state = state
+        if state in {FishingState.VERIFYING, FishingState.ACTIVE}:
+            self.indicator_last_used = time.monotonic()
         if self.settings.get("fishing_notifications", True) and state != FishingState.VERIFYING:
             self.show_fishing_status(state)
 
@@ -870,15 +899,16 @@ class Calibration:
             self.status_game = MinecraftWindow(self.key)
             hwnd = self.status_game.foreground_game()
         bounds = client_area(hwnd) if hwnd and self.settings.get("crosshair_status", True) else None
-        state = (self.fishing_state, bounds)
+        visible = bounds and time.monotonic() - self.indicator_last_used < INDICATOR_IDLE
+        state = (self.fishing_state, bounds) if visible else None
         if state == self.indicator_state:
             return
         self.indicator_state = state
         try:
-            if bounds:
+            if visible:
                 self.fishing_indicator.show(self.fishing_state, bounds, persistent=True)
             else:
-                self.fishing_indicator.hide()
+                self.fishing_indicator.fade_out()
         except (OSError, tk.TclError):
             pass
 
@@ -980,7 +1010,10 @@ class Calibration:
             elif self.matches:
                 event = self.matches.pop()
                 if self.reeling and not self.detect_stop.is_set():
-                    if not (event.watching and event.rod_selected and event.rod_visible):
+                    if event.locked or event.bite or (event.casts, event.reels, event.recasts) != self.indicator_counts:
+                        self.indicator_last_used = time.monotonic()
+                    self.indicator_counts = (event.casts, event.reels, event.recasts)
+                    if event.waiting or not (event.watching and event.rod_selected and event.rod_visible):
                         self.set_fishing_state(FishingState.PAUSED)
                     else:
                         self.set_fishing_state(FishingState.ACTIVE)
@@ -995,6 +1028,9 @@ class Calibration:
                 elif not event.rod_visible:
                     self.menu_status.set("Fishing paused")
                     detail = "Rod selected · Waiting for the held rod to appear."
+                elif event.waiting:
+                    self.menu_status.set("Fishing on standby")
+                    detail = event.waiting
                 else:
                     if event.bite:
                         self.menu_status.set("Bite detected")

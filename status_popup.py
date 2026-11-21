@@ -92,6 +92,25 @@ class FishingStatusPopup:
         if self.window is not None:
             self.window.withdraw()
 
+    def fade_out(self):
+        if self.window is None or not self.window.winfo_viewable():
+            return
+        if self.timer is not None:
+            self.root.after_cancel(self.timer)
+        opacity = float(self.window.attributes("-alpha"))
+        began = time.monotonic()
+
+        def animate():
+            fraction = (time.monotonic() - began) / FADE_OUT
+            if fraction >= 1:
+                self.timer = None
+                self.window.withdraw()
+                return
+            self.window.attributes("-alpha", opacity * (1 - fraction))
+            self.timer = self.root.after(16, animate)
+
+        animate()
+
     def show(self, state, bounds, on_finished=None, *, persistent=False, guidance=None, notification=False):
         if self.window is None:
             self.create()
