@@ -5,8 +5,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from calibrate import automatic_capture_area
 from navigation import guidance, world_key
-from seed_map import SeedMap, map_url
+from seed_map import SeedMap, map_displays, map_url
 from updates import download_release, is_update, latest_version
 
 
@@ -24,6 +25,22 @@ class NavigationTests(unittest.TestCase):
 
 
 class MapTests(unittest.TestCase):
+    @patch("seed_map.mss.MSS", side_effect=OSError("Display enumeration failed"))
+    def test_map_remains_configurable_without_a_display_list(self, _):
+        self.assertEqual(map_displays(), [])
+
+    @patch("seed_map.webbrowser.open")
+    @patch("seed_map.messagebox.askyesno", return_value=True)
+    def test_failed_map_worker_offers_browser_fallback(self, prompt, browser):
+        seed_map = SeedMap(Mock(), {}, None, None)
+        process = Mock()
+        process.poll.return_value = 1
+        seed_map.process = process
+        seed_map.check_worker(process, "https://www.chunkbase.com/apps/seed-map", 1)
+        prompt.assert_called_once()
+        browser.assert_called_once_with("https://www.chunkbase.com/apps/seed-map")
+        self.assertIsNone(seed_map.process)
+
     def test_disabled_map_stays_closed(self):
         map_settings = SeedMap(None, {"seed_map": {"seed": "1", "enabled": False}}, None, None)
         map_settings.launch = Mock()
@@ -45,6 +62,18 @@ class MapTests(unittest.TestCase):
         for overlay in (True, False):
             self.assertIn("seed=-9223372036854775807", map_url(config, overlay=overlay))
             self.assertIn("x=-12&z=8", map_url(config, overlay=overlay))
+
+
+class FishingDefaultsTests(unittest.TestCase):
+    def test_search_is_centered_and_capped_at_common_resolutions(self):
+        for width, height in ((1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)):
+            bounds = dict(left=-width, top=20, width=width, height=height)
+            area = automatic_capture_area(bounds)
+            self.assertEqual(area["left"] + area["width"] // 2, -width // 2)
+            self.assertEqual(area["top"] + area["height"] // 2, 20 + height // 2)
+            self.assertLessEqual(area["width"], 640)
+            self.assertLessEqual(area["height"], 480)
+        self.assertIsNone(automatic_capture_area(None))
 
 
 class UpdateTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 # Bobber Buddy
 
-Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It watches the bobber, reels in when it detects a bite, and casts again. Once calibrated, it can fish offline.
+Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It watches the bobber, reels in when it detects a bite, and casts again. Fishing works offline.
 
 **[Download Bobber Buddy for Windows](https://github.com/scrmarsh/BobberBuddy/releases/latest)**
 
@@ -14,13 +14,18 @@ Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It
 
 ## Install and start fishing
 
-1. Download the Windows x64 ZIP, extract all its files, and open **Bobber Buddy.exe**. The package targets Windows 10 and 11 and includes Python.
-2. Select **Bedrock Edition** or **Java Edition**. In Minecraft, cast into your fishing spot and keep the camera still. Windowed or borderless mode works best.
-3. In **Calibrate**, choose your game monitor and click **Capture screen (4s)**. Return to Minecraft before the capture, then draw a small search region around the bobber and nearby water. If the bundled template struggles, select just the bobber, click **Use region as template**, then redraw the wider search region.
-4. In **Calibrate**, click **Learn rod (4s)**. Return to Minecraft with the rod selected and visible in first person. In the captured image, draw a tight box around the reel and handle.
-5. Use **Test bobber** to check tracking, or press **F10** to toggle auto-fishing. **F9** is the emergency stop. Both keys can be changed in the app.
+Download the Windows x64 ZIP, extract all its files, and open **Bobber Buddy.exe**. The package targets Windows 10 and 11 and includes Python.
 
-Bobber Buddy starts scanning on launch after calibration. If a spot gives false bites or fails to track the float, use **Sample region (12s)** in **Calibrate** and review the replay. Adjust **Minimum match score** so the real bobber is detected more reliably than empty water. Recalibrate when the saved screen region no longer lines up with your fishing spot.
+In Bedrock Edition with the default textures, open the app, equip your rod, and aim at open water. Bobber Buddy loads bundled bobber and rod references and scans around the crosshair automatically. If it cannot confirm the rod is ready to cast, cast the first line yourself. Use **F10** to toggle auto-fishing or **F9** to stop it immediately.
+
+### Calibrate for Java or custom textures
+
+1. Select your edition. In Minecraft, cast into your fishing spot and keep the camera still. Windowed or borderless mode works best.
+2. In **Calibrate**, choose your game monitor and click **Capture screen (4s)**. Return to Minecraft before the capture, then draw a small search region around the bobber and nearby water. If the bundled template struggles, select just the bobber, click **Use region as template**, then redraw the wider search region.
+3. In **Calibrate**, click **Learn rod (4s)**. Return to Minecraft with the rod selected and visible in first person. In the captured image, draw a tight box around the reel and handle.
+4. Use **Test bobber** to check tracking, or press **F10** to toggle auto-fishing. **F9** is the emergency stop. Both keys can be changed in the app.
+
+If a spot gives false bites or fails to track the float, use **Sample region (12s)** in **Calibrate** and review the replay. Adjust **Minimum match score** so the real bobber is detected more reliably than empty water. Recalibrate when the saved screen region no longer lines up with your fishing spot.
 
 The Windows package saves settings and session logs under `%LOCALAPPDATA%\Bobber Buddy`.
 
@@ -28,7 +33,7 @@ The Windows package saves settings and session logs under `%LOCALAPPDATA%\Bobber
 
 Open **Minimap** and enter your seed, edition, game version, and dimension. To follow your position, enable **Show Coordinates** in Bedrock or leave the **F3** XYZ readout visible in Java.
 
-The map can appear as an in-game overlay, in a separate window, or both. It supports named waypoints and straight-line compass guidance. It uses Chunk Base, WebView2, Windows OCR, and an internet connection.
+The map can appear as an in-game overlay, in a separate window, or both. It supports named waypoints and straight-line compass guidance. It uses Chunk Base, WebView2, Windows OCR, and an internet connection. Use **Open in browser** from the minimap settings if the embedded map is unavailable.
 
 ## Run from source
 

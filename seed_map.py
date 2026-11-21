@@ -5,8 +5,9 @@ import subprocess
 import sys
 import time
 import tkinter as tk
+import webbrowser
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from urllib.parse import urlencode
 
 import mss
@@ -99,6 +100,14 @@ def default_display(displays, game_display, saved_key):
     return next((display for display in displays if display_key(display) != game_key), displays[0])
 
 
+def map_displays():
+    try:
+        with mss.MSS() as screen:
+            return list(screen.monitors[1:])
+    except (OSError, mss.ScreenShotError):
+        return []
+
+
 class SeedMap:
     def __init__(self, root, settings, save, monitor):
         self.root = root
@@ -107,19 +116,19 @@ class SeedMap:
         self.monitor = monitor
         self.process = None
         self.mode = None
+        self.log = DATA_DIR / "seed-map.log"
 
     def open_startup_overlay(self):
         stored = self.settings.get("seed_map", {})
         if not stored.get("seed") or not stored.get("enabled", stored.get("startup_overlay", True)):
             return
-        with mss.MSS() as screen:
-            displays = list(screen.monitors[1:])
-        display = default_display(displays, self.monitor(), stored.get("display"))
+        displays = map_displays()
+        display = default_display(displays, self.monitor(), stored.get("display")) if displays else None
         if self.process is None:
             mode = stored.get("mode", "overlay")
             if mode == "display" and len(displays) < 2:
                 mode = "window"
-            self.launch(dict(stored, mode=mode), display)
+            self.launch(dict(stored, mode=mode), display, report_error=False)
 
     def open_window(self, edition):
         stored = self.settings.get("seed_map", {})
@@ -130,10 +139,13 @@ class SeedMap:
             self.send("show_window")
             return
         mode = "both" if self.is_open() else "window"
-        self.close()
-        self.settings["seed_map"] = dict(stored, enabled=True, mode=mode)
-        self.open_startup_overlay()
-        self.save()
+        config = dict(stored, enabled=True, mode=mode)
+        try:
+            self.launch(config, None)
+            self.settings["seed_map"] = config
+            self.save()
+        except (OSError, ValueError, KeyError):
+            self.open_settings(edition, initial_error="The map window could not start. Check the map settings or open it in your browser.")
 
     def open_waypoints(self):
         config = self.settings.get("seed_map", {})
@@ -211,9 +223,8 @@ class SeedMap:
             ttk.Button(panel, text=title, command=lambda value=action: change(value)).pack(fill="x", pady=2)
         ttk.Label(panel, textvariable=status, wraplength=300).pack(fill="x")
 
-    def open_settings(self, edition):
-        with mss.MSS() as screen:
-            displays = list(screen.monitors[1:])
+    def open_settings(self, edition, initial_error=""):
+        displays = map_displays()
         dialog = tk.Toplevel(self.root)
         dialog.title(f"{APP_NAME} Minimap")
         dialog.transient(self.root)
@@ -228,7 +239,8 @@ class SeedMap:
             for index, display in enumerate(displays, 1)
         }
         editions = {"Bedrock Edition": "bedrock", "Java Edition": "java"}
-        saved_edition = next((label for label, key in editions.items() if key == stored.get("edition")), edition)
+        saved_edition = next((label for label, key in editions.items() if key == stored.get("edition")),
+                             edition if edition in editions else "Bedrock Edition")
         selection = tk.StringVar(value=saved_edition)
         seed = tk.StringVar(value=stored.get("seed", ""))
         version = tk.StringVar()
@@ -242,7 +254,7 @@ class SeedMap:
         mode = tk.StringVar(value=next((label for label in mode_choices
                                         if MAP_MODES[label] == stored.get("mode")), mode_choices[0]))
         display_name = tk.StringVar()
-        error = tk.StringVar()
+        error = tk.StringVar(value=initial_error)
         if displays:
             initial = default_display(displays, game_display, stored.get("display"))
             display_name.set(next(label for label, display in display_labels.items() if display is initial))
@@ -294,38 +306,46 @@ class SeedMap:
         ttk.Label(panel, textvariable=error, foreground="#ffbb91", wraplength=335).grid(
             row=11, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
+        def map_config(display):
+            center = ((coordinate(x.get()), coordinate(z.get()))
+                      if x.get().strip() or z.get().strip() or not follow.get() else (None, None))
+            return dict(seed=world_seed(seed.get()), edition=editions[selection.get()], version=version.get(),
+                        dimension=dimension.get(), x=center[0], z=center[1], follow=follow.get(),
+                        display=display_key(display) if display else None,
+                        mode=MAP_MODES[mode.get()], enabled=enabled.get())
+
         def launch():
             try:
-                if x.get().strip() or z.get().strip() or not follow.get():
-                    center = (coordinate(x.get()), coordinate(z.get()))
-                else:
-                    center = (None, None)
                 display = display_labels.get(display_name.get())
-                if display is None:
-                    raise ValueError("Choose a display for the mini-map.")
-                selected_mode = MAP_MODES[mode.get()]
-                if (selected_mode in FULLSCREEN_MODES and game_display
-                        and display_key(display) == display_key(game_display)):
-                    raise ValueError("Choose a different display for the full-screen map.")
-                config = dict(seed=world_seed(seed.get()), edition=editions[selection.get()],
-                              version=version.get(), dimension=dimension.get(), x=center[0], z=center[1],
-                              follow=follow.get(), display=display_key(display), mode=selected_mode,
-                              enabled=enabled.get())
+                config = map_config(display)
+                if config["mode"] in FULLSCREEN_MODES:
+                    if display is None:
+                        raise ValueError("Choose a display for the full-screen map.")
+                    if game_display and display_key(display) == display_key(game_display):
+                        raise ValueError("Choose a different display for the full-screen map.")
                 if enabled.get():
                     self.launch(config, display)
                 else:
                     self.close()
-            except (OSError, ValueError) as exc:
+                self.settings["seed_map"] = config
+                self.save()
+            except (OSError, ValueError, KeyError) as exc:
                 error.set(str(exc))
                 return
-            self.settings["seed_map"] = config
-            self.save()
             dialog.destroy()
+
+        def open_browser():
+            try:
+                if not webbrowser.open(map_url(map_config(None))):
+                    error.set("Windows could not open the default browser.")
+            except (ValueError, KeyError, OSError) as exc:
+                error.set(str(exc))
 
         actions = ttk.Frame(panel)
         actions.grid(row=12, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="Apply map settings", style="Accent.TButton", command=launch).pack(
             side="right", fill="x", expand=True)
+        ttk.Button(actions, text="Open in browser", command=open_browser).pack(side="left", padx=(0, 8))
         if self.process is not None and self.process.poll() is None:
             def close_maps():
                 self.close()
@@ -336,23 +356,43 @@ class SeedMap:
         dialog.grab_set()
         seed_entry.focus_set()
 
-    def launch(self, config, display):
+    def launch(self, config, display, *, report_error=True):
         if importlib.util.find_spec("webview") is None:
-            raise ValueError("Install the optional Seed Map dependencies listed in the README.")
+            raise ValueError("The embedded map dependencies are unavailable. Try Open in browser.")
+        url = map_url(config)
         self.close()
         script = Path(__file__).with_name("seed_map_view.py")
-        log = DATA_DIR / "seed-map.log"
         command = [sys.executable, "--map-worker" if FROZEN else str(script)]
-        log.parent.mkdir(exist_ok=True)
-        with log.open("wb") as diagnostics:
+        self.log.parent.mkdir(parents=True, exist_ok=True)
+        with self.log.open("wb") as diagnostics:
             self.process = subprocess.Popen(
                 command, stdin=subprocess.PIPE, stdout=diagnostics, stderr=diagnostics,
                 text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW,
             )
         navigation = self.settings.get("navigation", {}).get(json.dumps(world_key(config), ensure_ascii=False), {})
-        self.process.stdin.write(json.dumps(dict(config, target_display=display, navigation=navigation)) + "\n")
-        self.process.stdin.flush()
+        try:
+            self.process.stdin.write(json.dumps(dict(config, target_display=display, navigation=navigation)) + "\n")
+            self.process.stdin.flush()
+        except OSError as exc:
+            self.close()
+            raise OSError("The embedded map could not start. Try Open in browser.") from exc
         self.mode = config["mode"]
+        if report_error:
+            self.root.after(700, self.check_worker, self.process, url, 12)
+
+    def check_worker(self, process, url, remaining):
+        if process is not self.process:
+            return
+        result = process.poll()
+        if result is None and remaining:
+            self.root.after(700, self.check_worker, process, url, remaining - 1)
+        elif result:
+            self.close()
+            if messagebox.askyesno("Minimap unavailable",
+                                   "The embedded map could not start. Check that Microsoft Edge WebView2 Runtime "
+                                   "is installed. Open the seed map in your browser instead?",
+                                   parent=self.root):
+                webbrowser.open(url)
 
     def close(self):
         if self.process is not None:
@@ -360,7 +400,7 @@ class SeedMap:
             self.process = None
             try:
                 process.stdin.close()
-            except BrokenPipeError:
+            except OSError:
                 pass
 
     def zoom(self, action):
@@ -372,7 +412,7 @@ class SeedMap:
         try:
             self.process.stdin.write(action + "\n")
             self.process.stdin.flush()
-        except BrokenPipeError:
+        except OSError:
             pass
 
     def is_open(self):

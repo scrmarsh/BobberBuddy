@@ -45,7 +45,7 @@ def default_template(edition):
 EDITIONS = {"Java Edition": "java", "Bedrock Edition": "bedrock"}
 EXAMPLE = {"java": "java.png", "bedrock": "bedrock.jpg"}
 EXAMPLE_REGION = {"java": (610, 180, 760, 320), "bedrock": (560, 420, 720, 550)}
-INITIAL_CUTOFF = {"java": 0.82, "bedrock": 0.77}
+INITIAL_CUTOFF = {"java": 0.82, "bedrock": 0.82}
 COUNTDOWN = 4
 DURATION = 12
 INTERVAL = 0.08
@@ -79,6 +79,17 @@ def fishing_capture_area(monitor, box, edition):
         x2 = min(monitor["width"], x2 + side_margin)
     return dict(left=monitor["left"] + x1, top=monitor["top"] + y1,
                 width=x2 - x1, height=y2 - y1)
+
+
+def automatic_capture_area(bounds):
+    """Keep the search around the casting crosshair at any window size."""
+    if not bounds or bounds["width"] < 240 or bounds["height"] < 160:
+        return None
+    width = min(640, bounds["width"] * 3 // 10)
+    height = min(480, bounds["height"] * 2 // 5)
+    return dict(left=bounds["left"] + (bounds["width"] - width) // 2,
+                top=bounds["top"] + (bounds["height"] - height) // 2,
+                width=width, height=height)
 
 
 def capture(area, matcher, stop, threshold=None):
@@ -116,6 +127,7 @@ def capture_rod_reference(edition, stop):
 
 
 def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None, uncast_rod=None):
+    automatic = area is None
     reels = 0
     bites = 0
     recasts = 0
@@ -131,21 +143,27 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
             if rod is None:
                 return False
             try:
-                slot = read_selected_slot(screen, game.identity[0])
+                hwnd = game.identity[0]
+                if rod.matches(read_selected_slot(screen, hwnd)):
+                    return True
+                return (rod.muted_reference is not None
+                        and rod.matches(read_selected_slot(screen, hwnd, muted=True), muted=True))
             except mss.ScreenShotError:
                 return False
-            return rod.matches(slot)
 
         def rod_visible():
             if held_rod is None:
                 return False
             try:
-                return held_rod.visible(screen, game.identity[0])
+                return (held_rod.visible(screen, game.identity[0])
+                        or (uncast_rod is not None and uncast_rod.visible(screen, game.identity[0])))
             except mss.ScreenShotError:
                 return False
 
         def use_verified_rod():
-            return rod_selected() and rod_visible() and game.use_rod(stop)
+            return (rod_selected() and rod_visible() and
+                    (not automatic or area == automatic_capture_area(client_area(game.identity[0])))
+                    and game.use_rod(stop))
 
         def stowed_hook_visible():
             try:
@@ -156,7 +174,16 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
         while not stop.is_set():
             now = time.monotonic()
             event = FishingFrame(None)
-            if not game.focused():
+            focused = game.focused()
+            if automatic:
+                next_area = automatic_capture_area(client_area(game.identity[0])) if focused else None
+                if area != next_area:
+                    area = next_area
+                    detector.reset()
+                    recast_at = None
+                    clear_since = None
+                    cast_armed = True
+            if not focused or area is None:
                 if recast_at is not None:
                     cast_armed = True
                 recast_at = None
@@ -188,7 +215,15 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                         clear_since = None
                     detector.reset()
             elif now >= settle_until:
-                frame = cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR)
+                try:
+                    frame = cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR)
+                except mss.ScreenShotError:
+                    detector.reset()
+                    clear_since = None
+                    latest.append(FishingFrame(None, watching=False, reels=reels, bites=bites,
+                                               recasts=recasts, casts=casts))
+                    stop.wait(INTERVAL)
+                    continue
                 event = replace(detector.update(frame, now), locked=detector.stable >= 4)
                 if auto_reel:
                     float_visible = event.locked or (event.match is not None and event.match.score >= detector.threshold)
@@ -197,7 +232,8 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                         clear_since = None
                     if event.locked:
                         cast_armed = False
-                    if not float_visible and (cast_armed or recovery_ready):
+                    if (not float_visible and (cast_armed or recovery_ready)
+                            and (not automatic or uncast_rod is not None)):
                         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                         water = cv2.inRange(hsv, (82, 30, 32), (132, 255, 245))
                         if (np.count_nonzero(water) < water.size * 0.45
@@ -248,7 +284,7 @@ class Calibration:
         except (OSError, ValueError):
             self.settings = {}
         saved_edition = self.settings.get("edition")
-        self.edition = tk.StringVar(value=saved_edition if saved_edition in EDITIONS else "Java Edition")
+        self.edition = tk.StringVar(value=saved_edition if saved_edition in EDITIONS else "Bedrock Edition")
         self.status_game = MinecraftWindow(EDITIONS[self.edition.get()])
         self.threshold = tk.DoubleVar()
         self.frame_index = tk.DoubleVar()
@@ -557,12 +593,11 @@ class Calibration:
         self.template_name.set(name)
         if self.detection is not None:
             return
-        self.menu_status.set("Ready" if self.matcher and self.detection_area() else "Setup needed")
-        self.menu_detail.set(
-            "Use your toggle hotkey to enable automatic fishing."
-            if self.matcher and self.detection_area() else
-            "Choose a template and save a live search region in Calibrate."
-        )
+        ready = self.matcher is not None and all(
+            self.rod_reference(kind).is_file() for kind in ("hotbar", "held"))
+        self.menu_status.set("Ready" if ready else "Setup needed")
+        self.menu_detail.set("Equip your fishing rod and aim at open water." if ready else
+                             "Choose a bobber template and learn your rod in Calibrate.")
 
     def rebind(self, action):
         self.rebinding = True
@@ -626,8 +661,10 @@ class Calibration:
         index = self.monitor.current()
         return self.monitors[index] if index >= 0 else None
 
-    def rod_reference(self, kind):
-        return LOCAL / f"{self.key}-{kind}-rod.png"
+    def rod_reference(self, kind, *, custom=False):
+        name = f"{self.key}-{kind}-rod.png"
+        local = LOCAL / name
+        return local if custom or local.is_file() else ASSETS / name
 
     def learn_rod(self):
         if not messagebox.askokcancel("Learn fishing rod",
@@ -650,8 +687,8 @@ class Calibration:
             reference = reference_from_region(self.scene, box)
             HeldRod(reference)
             LOCAL.mkdir(exist_ok=True)
-            if not (cv2.imwrite(str(self.rod_reference("held")), reference)
-                    and cv2.imwrite(str(self.rod_reference("hotbar")), self.rod_learning)):
+            if not (cv2.imwrite(str(self.rod_reference("held", custom=True)), reference)
+                    and cv2.imwrite(str(self.rod_reference("hotbar", custom=True)), self.rod_learning)):
                 raise OSError("Could not save the rod references.")
         except (OSError, ValueError, cv2.error) as error:
             self.status.set(str(error))
@@ -669,9 +706,9 @@ class Calibration:
         if self.busy or self.rebinding or not self.menu.winfo_ismapped():
             return
         area = self.detection_area()
-        if area is None or self.matcher is None:
+        if self.matcher is None:
             self.menu_status.set("Setup needed")
-            self.menu_detail.set("Save a live region up to 640 × 480 pixels in Calibrate.")
+            self.menu_detail.set("Choose a bobber template in Calibrate.")
             return
         reeling = not test
         rod = None
@@ -689,7 +726,10 @@ class Calibration:
                 self.menu_status.set("Rod setup needed")
                 self.menu_detail.set("Use Learn rod in Calibrate to save the hotbar icon and held rod.")
                 return
-            rod = HotbarRod(reference)
+            alternate_path = ASSETS / f"{self.key}-muted-rod.png"
+            alternate = (cv2.imread(str(alternate_path))
+                         if path.parent == ASSETS and alternate_path.is_file() else None)
+            rod = HotbarRod(reference, alternate)
             uncast_path = self.rod_reference("uncast")
             if uncast_path.is_file():
                 try:
@@ -1178,6 +1218,12 @@ if __name__ == "__main__":
         try:
             Matcher(ASSETS / "bedrock-bobber.png")
             Matcher(ASSETS / "java-bobber.png")
+            hotbar = cv2.imread(str(ASSETS / "bedrock-hotbar-rod.png"))
+            muted = cv2.imread(str(ASSETS / "bedrock-muted-rod.png"))
+            assert all(ref is not None and ref.shape[:2] == (40, 40) for ref in (hotbar, muted))
+            HotbarRod(hotbar, muted)
+            for kind in ("held", "uncast"):
+                HeldRod(cv2.imread(str(ASSETS / f"bedrock-{kind}-rod.png"), cv2.IMREAD_UNCHANGED))
             reader = CoordinateReader("bedrock")
             import webview
             from webview.platforms import winforms
@@ -1189,13 +1235,27 @@ if __name__ == "__main__":
         raise SystemExit
     if "--map-worker" in sys.argv:
         import msvcrt
-        from seed_map_view import main
+        import traceback
 
-        if sys.stdin is None:
-            get_handle = ctypes.windll.kernel32.GetStdHandle
-            get_handle.restype = ctypes.c_void_p
-            sys.stdin = os.fdopen(msvcrt.open_osfhandle(get_handle(-10), os.O_RDONLY), encoding="utf-8")
-        main()
+        get_handle = ctypes.windll.kernel32.GetStdHandle
+        get_handle.argtypes = [ctypes.c_ulong]
+        get_handle.restype = ctypes.c_void_p
+        for stream, number, flags, mode in (("stderr", -12, os.O_WRONLY, "w"),
+                                            ("stdout", -11, os.O_WRONLY, "w"),
+                                            ("stdin", -10, os.O_RDONLY, "r")):
+            if getattr(sys, stream) is None:
+                handle = get_handle(number)
+                if handle and handle != ctypes.c_void_p(-1).value:
+                    setattr(sys, stream, os.fdopen(msvcrt.open_osfhandle(handle, flags), mode,
+                                                  encoding="utf-8", buffering=1))
+        try:
+            from seed_map_view import main
+
+            main()
+        except Exception:
+            if sys.stderr is not None:
+                traceback.print_exc(file=sys.stderr)
+            raise SystemExit(1)
         raise SystemExit
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("BobberBuddy.Desktop")
     root = tk.Tk()

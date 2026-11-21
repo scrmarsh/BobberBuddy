@@ -4,13 +4,14 @@ import numpy as np
 from game_window import client_area
 
 
-def selected_slot(frame):
+def selected_slot(frame, *, muted=False):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     saturation = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[:, :, 1]
-    highlight = (gray >= 164) & (saturation < 100)
+    highlight = (gray >= (140 if muted else 164)) & (saturation < 100)
     height, width = gray.shape
     candidates = []
-    bright = highlight & (gray >= 174)
+    bright = highlight & (gray >= (150 if muted else 174))
+    side_minimum = 0.60 if muted else 0.70
     # A slot needs a continuous 13-pixel top edge. Reject rows with
     # no such edge before extracting individual horizontal runs.
     kernel = np.ones((1, 13), dtype=np.uint8)
@@ -24,7 +25,8 @@ def selected_slot(frame):
                 continue
             side = max(1, size // 18)
             middle = highlight[top + size // 6:top + size * 4 // 5]
-            if middle[:, left:left + side].mean() < 0.70 or middle[:, right - side:right].mean() < 0.70:
+            if (middle[:, left:left + side].mean() < side_minimum
+                    or middle[:, right - side:right].mean() < side_minimum):
                 continue
             candidates.append((size, top, int(left)))
     if not candidates:
@@ -35,7 +37,7 @@ def selected_slot(frame):
     return cv2.resize(icon, (40, 40), interpolation=cv2.INTER_AREA)
 
 
-def read_selected_slot(screen, hwnd):
+def read_selected_slot(screen, hwnd, *, muted=False):
     area = client_area(hwnd)
     if area is None or area["width"] < 240 or area["height"] < 160:
         return None
@@ -43,16 +45,19 @@ def read_selected_slot(screen, hwnd):
     height = max(105, area["height"] // 5)
     strip = dict(left=area["left"] + (area["width"] - width) // 2,
                  top=area["top"] + area["height"] - height, width=width, height=height)
-    return selected_slot(cv2.cvtColor(np.asarray(screen.grab(strip)), cv2.COLOR_BGRA2BGR))
+    return selected_slot(cv2.cvtColor(np.asarray(screen.grab(strip)), cv2.COLOR_BGRA2BGR), muted=muted)
 
 
 class HotbarRod:
-    def __init__(self, reference):
+    def __init__(self, reference, muted_reference=None):
         self.reference = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
+        self.muted_reference = (cv2.cvtColor(muted_reference, cv2.COLOR_BGR2GRAY)
+                                if muted_reference is not None else None)
 
-    def matches(self, slot):
-        if slot is None:
+    def matches(self, slot, *, muted=False):
+        reference = self.muted_reference if muted else self.reference
+        if slot is None or reference is None:
             return False
         gray = cv2.cvtColor(slot, cv2.COLOR_BGR2GRAY)
-        score = cv2.matchTemplate(gray, self.reference, cv2.TM_CCOEFF_NORMED).item()
+        score = cv2.matchTemplate(gray, reference, cv2.TM_CCOEFF_NORMED).item()
         return score >= 0.84

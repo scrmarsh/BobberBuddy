@@ -19,14 +19,18 @@ def main():
     icon = stage / "bobber.ico"
     with Image.open(ASSETS / "night-fishing-bobber.png") as image:
         image.save(icon, sizes=[(32, 32), (48, 48), (256, 256)])
-    for edition in ("java", "bedrock"):
+    bobber = stage / "java-bobber.png"
+    if not (ASSETS / bobber.name).is_file():
         template = Image.new("RGBA", (16, 16))
         draw = ImageDraw.Draw(template)
         draw.rectangle((7, 0, 9, 4), fill="#24262a")
         draw.polygon([(2, 5), (13, 5), (15, 8), (15, 11), (12, 14), (3, 14), (0, 11), (0, 8)],
                      fill="#d0d4d8")
         draw.rectangle((1, 9, 14, 11), fill="#a92420")
-        template.save(stage / f"{edition}-bobber.png")
+        template.save(bobber)
+    references = sorted(ASSETS.glob("*-bobber.png")) + sorted(ASSETS.glob("*-rod.png"))
+    if not (ASSETS / bobber.name).is_file():
+        references.append(bobber)
     version = tuple(map(int, VERSION.split("."))) + (0,)
     metadata = stage / "version.txt"
     metadata.write_text(
@@ -43,10 +47,8 @@ def main():
         "--noconfirm", "--onedir", "--windowed", "--name", APP_NAME,
         "--workpath", str(ROOT / "build" / "pyinstaller"), "--specpath", str(stage),
         "--distpath", str(dist), "--icon", str(icon), "--version-file", str(metadata),
-        "--add-data", f"{ASSETS / 'night-fishing-bobber.png'}:assets",
         "--add-data", f"{icon}:assets",
-        "--add-data", f"{stage / 'bedrock-bobber.png'}:assets",
-        "--add-data", f"{stage / 'java-bobber.png'}:assets",
+        *[argument for reference in references for argument in ("--add-data", f"{reference}:assets")],
         "--collect-all", "webview", "--collect-submodules", "winrt",
         "--hidden-import", "clr", str(ROOT / "calibrate.py"),
     ])

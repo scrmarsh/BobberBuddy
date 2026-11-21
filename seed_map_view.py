@@ -395,6 +395,18 @@ async def follow(views, config, stopping, zoom_requests=None):
             await asyncio.sleep(delay)
 
 
+def close_views(views):
+    from System import Action
+
+    for window, _, closed in views:
+        if closed.is_set() or not window.events.before_show.wait(5):
+            continue
+        native = window.native
+        if native is not None and not native.IsDisposed:
+            window.bobber_shutdown = True
+            native.BeginInvoke(Action(native.Close))
+
+
 def start(views, config, stopping):
     zoom_requests = deque(maxlen=32)
 
@@ -404,10 +416,7 @@ def start(views, config, stopping):
             if action in MAP_ZOOM_COMMANDS or action == "show_window" or action.startswith("navigation "):
                 zoom_requests.append(action)
         stopping.set()
-        for window, _, closed in views:
-            if not closed.is_set() and window.native and not window.native.IsDisposed:
-                window.bobber_shutdown = True
-                window.destroy()
+        close_views(views)
 
     Thread(target=watch_parent, daemon=True).start()
     asyncio.run(follow(views, config, stopping, zoom_requests))
@@ -556,8 +565,21 @@ def main():
         views.append((overlay, True, Event()))
     for window, _, closed in views:
         window.events.closed += closed.set
+    errors = []
+    stopping = Event()
+
+    def run():
+        try:
+            start(views, config, stopping)
+        except Exception as error:
+            errors.append(error)
+            stopping.set()
+            close_views(views)
+
     icon = ASSETS / "bobber.ico"
-    webview.start(start, (views, config, Event()), gui="edgechromium", icon=str(icon) if icon.is_file() else None)
+    webview.start(run, gui="edgechromium", icon=str(icon) if icon.is_file() else None)
+    if errors:
+        raise errors[0]
 
 
 if __name__ == "__main__":

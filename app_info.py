@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 APP_NAME = "Bobber Buddy"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 RELEASE_REPOSITORY = "scrmarsh/BobberBuddy"
 ROOT = Path(__file__).resolve().parent
 FROZEN = getattr(sys, "frozen", False)
