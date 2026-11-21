@@ -7,7 +7,7 @@ import time
 import tkinter as tk
 import webbrowser
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 from urllib.parse import urlencode
 
 import mss
@@ -77,6 +77,10 @@ def coordinate(value):
     return int(value)
 
 
+def seed_profile(config):
+    return {field: config.get(field) for field in ("seed", "edition", "version", "dimension")}
+
+
 def map_url(config, *, overlay=False):
     center = dict(x=config["x"], z=config["z"]) if config["x"] is not None else {}
     state = dict(seed=config["seed"], platform=VERSIONS[config["edition"]][config["version"]],
@@ -117,6 +121,21 @@ class SeedMap:
         self.process = None
         self.mode = None
         self.log = DATA_DIR / "seed-map.log"
+
+    def save_seed(self, name, config):
+        label = name.strip()
+        if not label or len(label) > 64:
+            raise ValueError("Enter a seed name of up to 64 characters.")
+        previous = self.settings.get("saved_seeds", {})
+        profile = seed_profile(config)
+        profile["seed"] = world_seed(profile["seed"] or "")
+        self.settings["saved_seeds"] = {**previous, label: profile}
+        try:
+            self.save()
+        except OSError:
+            self.settings["saved_seeds"] = previous
+            raise
+        return label
 
     def open_startup_overlay(self):
         stored = self.settings.get("seed_map", {})
@@ -263,54 +282,95 @@ class SeedMap:
             ttk.Label(panel, text=label).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 12))
             widget.grid(row=row, column=1, sticky="ew", pady=4)
 
-        seed_entry = ttk.Entry(panel, textvariable=seed, width=29)
-        place(0, "World seed", seed_entry)
-        edition_picker = ttk.Combobox(panel, textvariable=selection, values=list(editions), state="readonly")
-        place(1, "Edition", edition_picker)
-        versions = ttk.Combobox(panel, textvariable=version, state="readonly")
-        place(2, "Game version", versions)
+        library = ttk.Frame(panel)
+        profiles = self.settings.get("saved_seeds", {})
+        profile_picker = ttk.Combobox(library, values=sorted(profiles, key=str.casefold), state="readonly", width=18)
+        profile_picker.set(next((name for name, profile in profiles.items() if profile == seed_profile(stored)), ""))
+        profile_picker.pack(side="left", fill="x", expand=True)
+        place(0, "Saved seeds", library)
 
-        def refresh_versions(_=None):
+        seed_entry = ttk.Entry(panel, textvariable=seed, width=29)
+        place(1, "World seed", seed_entry)
+        edition_picker = ttk.Combobox(panel, textvariable=selection, values=list(editions), state="readonly")
+        place(2, "Edition", edition_picker)
+        versions = ttk.Combobox(panel, textvariable=version, state="readonly")
+        place(3, "Game version", versions)
+
+        def refresh_versions(preferred=None):
             choices = list(VERSIONS[editions[selection.get()]])
             versions.configure(values=choices)
-            remembered = stored.get("version") if editions[selection.get()] == stored.get("edition") else None
-            version.set(remembered if remembered in choices else choices[0])
+            version.set(preferred if preferred in choices else choices[0])
 
-        edition_picker.bind("<<ComboboxSelected>>", refresh_versions)
-        refresh_versions()
-        place(3, "Dimension", ttk.Combobox(panel, textvariable=dimension, values=list(DIMENSIONS), state="readonly"))
+        edition_picker.bind("<<ComboboxSelected>>", lambda _: refresh_versions())
+        refresh_versions(stored.get("version"))
+        place(4, "Dimension", ttk.Combobox(panel, textvariable=dimension, values=list(DIMENSIONS), state="readonly"))
         coordinates = ttk.Frame(panel)
         ttk.Label(coordinates, text="X").pack(side="left")
         ttk.Entry(coordinates, textvariable=x, width=10).pack(side="left", padx=(4, 10))
         ttk.Label(coordinates, text="Z").pack(side="left")
         ttk.Entry(coordinates, textvariable=z, width=10).pack(side="left", padx=(4, 0))
         mode_picker = ttk.Combobox(panel, values=mode_choices, textvariable=mode, state="readonly")
-        place(4, "Map view", mode_picker)
+        place(5, "Map view", mode_picker)
         display_picker = ttk.Combobox(panel, values=list(display_labels), state="readonly", textvariable=display_name)
-        place(5, "Full-screen display", display_picker)
+        place(6, "Full-screen display", display_picker)
 
         def refresh_display(_=None):
             display_picker.configure(state="readonly" if MAP_MODES[mode.get()] in FULLSCREEN_MODES else "disabled")
 
         mode_picker.bind("<<ComboboxSelected>>", refresh_display)
         refresh_display()
-        place(6, "Map center", coordinates)
+        place(7, "Map center", coordinates)
         ttk.Checkbutton(panel, text="Follow coordinates shown in Minecraft", variable=follow).grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(8, 4))
+            row=8, column=0, columnspan=2, sticky="w", pady=(8, 4))
         ttk.Checkbutton(panel, text="Minimap enabled", variable=enabled).grid(
-            row=8, column=0, columnspan=2, sticky="w", pady=(0, 4))
+            row=9, column=0, columnspan=2, sticky="w", pady=(0, 4))
         ttk.Label(panel, text="Show Coordinates in Bedrock · F3 in Java", wraplength=335).grid(
-            row=9, column=0, columnspan=2, sticky="w")
+            row=10, column=0, columnspan=2, sticky="w")
         ttk.Label(panel, text="The online Chunk Base map uses your seed and X/Z.", wraplength=335).grid(
-            row=10, column=0, columnspan=2, sticky="w", pady=(5, 0))
-        ttk.Label(panel, textvariable=error, foreground="#ffbb91", wraplength=335).grid(
             row=11, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        ttk.Label(panel, textvariable=error, foreground="#ffbb91", wraplength=335).grid(
+            row=12, column=0, columnspan=2, sticky="w", pady=(5, 0))
+
+        def seed_config():
+            return dict(seed=world_seed(seed.get()), edition=editions[selection.get()],
+                        version=version.get(), dimension=dimension.get())
+
+        def choose_seed(_):
+            profile = self.settings["saved_seeds"][profile_picker.get()]
+            selection.set(next(label for label, key in editions.items() if key == profile["edition"]))
+            refresh_versions(profile["version"])
+            seed.set(profile["seed"])
+            dimension.set(profile["dimension"])
+            x.set("")
+            z.set("")
+            follow.set(True)
+            error.set("")
+
+        def save_seed():
+            try:
+                config = seed_config()
+                name = simpledialog.askstring("Save seed", "Name this Minecraft world", parent=dialog)
+                if name is None:
+                    return
+                profiles = self.settings.get("saved_seeds", {})
+                existing = next((label for label in profiles if label.casefold() == name.strip().casefold()), None)
+                if existing and not messagebox.askyesno("Update saved seed", f"Replace the seed saved as “{existing}”?",
+                                                        parent=dialog):
+                    return
+                saved = self.save_seed(existing or name, config)
+                profile_picker.configure(values=sorted(self.settings["saved_seeds"], key=str.casefold))
+                profile_picker.set(saved)
+                error.set("")
+            except (OSError, ValueError) as exc:
+                error.set(str(exc))
+
+        profile_picker.bind("<<ComboboxSelected>>", choose_seed)
+        ttk.Button(library, text="Save seed…", command=save_seed).pack(side="left", padx=(6, 0))
 
         def map_config(display):
             center = ((coordinate(x.get()), coordinate(z.get()))
                       if x.get().strip() or z.get().strip() or not follow.get() else (None, None))
-            return dict(seed=world_seed(seed.get()), edition=editions[selection.get()], version=version.get(),
-                        dimension=dimension.get(), x=center[0], z=center[1], follow=follow.get(),
+            return dict(seed_config(), x=center[0], z=center[1], follow=follow.get(),
                         display=display_key(display) if display else None,
                         mode=MAP_MODES[mode.get()], enabled=enabled.get())
 
@@ -342,7 +402,7 @@ class SeedMap:
                 error.set(str(exc))
 
         actions = ttk.Frame(panel)
-        actions.grid(row=12, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        actions.grid(row=13, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="Apply map settings", style="Accent.TButton", command=launch).pack(
             side="right", fill="x", expand=True)
         ttk.Button(actions, text="Open in browser", command=open_browser).pack(side="left", padx=(0, 8))

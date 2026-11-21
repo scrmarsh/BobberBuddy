@@ -33,6 +33,8 @@ The Windows package saves settings and session logs under `%LOCALAPPDATA%\Bobber
 
 Open **Minimap** and enter your seed, edition, game version, and dimension. To follow your position, enable **Show Coordinates** in Bedrock or leave the **F3** XYZ readout visible in Java.
 
+Use **Save seed…** to name a world and keep it in **Saved seeds**. Pick a saved world to restore its seed, edition, version, and dimension, then select **Apply map settings** to switch the map.
+
 The map can appear as an in-game overlay, in a separate window, or both. It supports named waypoints and straight-line compass guidance. It uses Chunk Base, WebView2, Windows OCR, and an internet connection. Use **Open in browser** from the minimap settings if the embedded map is unavailable.
 
 ## Run from source

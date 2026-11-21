@@ -1,5 +1,6 @@
 import unittest
 import hashlib
+import json
 from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,6 +26,29 @@ class NavigationTests(unittest.TestCase):
 
 
 class MapTests(unittest.TestCase):
+    def test_named_seed_persists_without_switching_the_current_map(self):
+        active = {"seed": "27", "enabled": False, "mode": "overlay"}
+        settings = {"seed_map": active}
+        with TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            map_settings = SeedMap(None, settings, lambda: settings_path.write_text(json.dumps(settings)), None)
+            config = dict(seed="-9223372036854775808", edition="bedrock",
+                          version="26.60–26.65", dimension="Nether")
+            self.assertEqual(map_settings.save_seed("  Ocean Base  ", dict(config, display="Secondary")), "Ocean Base")
+            map_settings.save_seed("Village", dict(config, seed="+12", dimension="Overworld"))
+            loaded = json.loads(settings_path.read_text())
+        self.assertEqual(loaded["seed_map"], active)
+        self.assertEqual(loaded["saved_seeds"]["Ocean Base"], config)
+        self.assertEqual(loaded["saved_seeds"]["Village"]["seed"], "12")
+
+    def test_seed_storage_failure_keeps_previous_profiles(self):
+        previous = {"Home": {"seed": "28"}}
+        settings = {"saved_seeds": previous}
+        map_settings = SeedMap(None, settings, Mock(side_effect=OSError("Disk unavailable")), None)
+        with self.assertRaisesRegex(OSError, "Disk unavailable"):
+            map_settings.save_seed("Home", {"seed": "29"})
+        self.assertEqual(settings["saved_seeds"], previous)
+
     @patch("seed_map.mss.MSS", side_effect=OSError("Display enumeration failed"))
     def test_map_remains_configurable_without_a_display_list(self, _):
         self.assertEqual(map_displays(), [])
