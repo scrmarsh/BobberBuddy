@@ -1,0 +1,7 @@
+-r requirements.txt
+pywebview>=6.2,<6.3
+winrt-Windows.Foundation>=3.2,<4
+winrt-Windows.Globalization>=3.2,<4
+winrt-Windows.Graphics.Imaging>=3.2,<4
+winrt-Windows.Media.Ocr>=3.2,<4
+winrt-Windows.Storage.Streams>=3.2,<4

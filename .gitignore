@@ -1,0 +1,6 @@
+.local/
+.venv/
+__pycache__/
+concepts/
+assets/bobber.png
+assets/bobber.ico
