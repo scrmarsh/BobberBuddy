@@ -37,6 +37,8 @@ Use **Save seed…** to name a world and keep it in **Saved seeds**. Pick a save
 
 The map can appear as an in-game overlay, in a separate window, or both. It supports named waypoints and straight-line compass guidance. It uses Chunk Base, WebView2, Windows OCR, and an internet connection. Use **Open in browser** from the minimap settings if the embedded map is unavailable.
 
+With the in-game overlay enabled, press **Esc** from gameplay to expand the map on the right side of the pause menu. Use **Features** to toggle structures, scroll to the display controls, or drag the map to explore. The map returns to its compact view when you resume.
+
 ## Run from source
 
 ~~~powershell

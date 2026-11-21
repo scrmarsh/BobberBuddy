@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from calibrate import automatic_capture_area
 from navigation import guidance, world_key
 from seed_map import SeedMap, map_displays, map_url
+from seed_map_view import PauseMap, editing_box
 from updates import download_release, is_update, latest_version
 
 
@@ -98,6 +99,37 @@ class FishingDefaultsTests(unittest.TestCase):
             self.assertLessEqual(area["width"], 640)
             self.assertLessEqual(area["height"], 480)
         self.assertIsNone(automatic_capture_area(None))
+
+
+class MapPauseTests(unittest.TestCase):
+    def test_escape_waits_for_cursor_then_leaves_on_resume(self):
+        pause = PauseMap()
+        self.assertFalse(pause.update("pause_open", foreground=True, captured=True, now=0))
+        self.assertTrue(pause.update(None, foreground=True, captured=False, now=0.1))
+        self.assertTrue(pause.update(None, foreground=True, captured=False, now=2))
+        self.assertFalse(pause.update(None, foreground=True, captured=True, now=3))
+
+    def test_menu_cursor_alone_does_not_open_map(self):
+        pause = PauseMap()
+        self.assertFalse(pause.update(None, foreground=True, captured=False, now=0))
+        self.assertFalse(pause.update("pause_open", foreground=True, captured=True, now=1))
+        self.assertFalse(pause.update(None, foreground=True, captured=False, now=3))
+
+    def test_escape_and_focus_loss_close_map(self):
+        for command, foreground in (("pause_close", True), (None, False)):
+            pause = PauseMap()
+            self.assertTrue(pause.update("pause_open", foreground=True, captured=False, now=0))
+            self.assertFalse(pause.update(command, foreground=foreground, captured=False, now=1))
+            self.assertFalse(pause.update(None, foreground=True, captured=False, now=2))
+
+    def test_editor_leaves_left_and_center_of_pause_menu_free(self):
+        bounds = dict(left=-1280, top=0, width=1280, height=720)
+        for edition, free_width in (("bedrock", 640), ("java", 820)):
+            x, y, width, height = editing_box(bounds, edition)
+            self.assertGreater(x, bounds["left"] + free_width)
+            self.assertLessEqual(x + width, 0)
+            self.assertGreater(y, bounds["top"])
+            self.assertLess(y + height, bounds["height"])
 
 
 class UpdateTests(unittest.TestCase):

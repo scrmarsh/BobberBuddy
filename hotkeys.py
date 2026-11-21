@@ -16,6 +16,7 @@ MAP_KEYS = ("=", "-", *KEYS)
 VIRTUAL_KEYS = {"=": 0xBB, "-": 0xBD, **{key: 0x70 + i for i, key in enumerate(KEYS)}}
 CHAT_OPEN = {0x54, 0xBF, 0x6F}  # T, slash and numpad slash
 CHAT_CLOSE = {0x0D, 0x1B}  # Enter and Esc
+ESCAPE = 0x1B
 
 
 class Hotkeys:
@@ -115,7 +116,7 @@ class GameZoomKeys:
             elif key not in self.down and (key in CHAT_OPEN or key in CHAT_CLOSE or key in self.bindings.values()):
                 if self.window is not None and USER32.GetForegroundWindow() == self.window:
                     self.down.add(key)
-                    self.messages.append(key)
+                    self.messages.append((key, key == ESCAPE and self.game.focused()))
         return USER32.CallNextHookEx(None, code, message, data)
 
     def poll(self, edition):
@@ -143,11 +144,13 @@ class GameZoomKeys:
             self.chat = False
             self.cursor_released = False
         while self.messages:
-            key = self.messages.popleft()
+            key, from_gameplay = self.messages.popleft()
             if key in CHAT_OPEN:
                 self.chat = True
                 self.cursor_released = not active
             elif key in CHAT_CLOSE:
+                if key == ESCAPE and not self.chat:
+                    yield "pause_open" if from_gameplay else "pause_close"
                 self.chat = False
                 self.cursor_released = False
             elif active and not self.chat:

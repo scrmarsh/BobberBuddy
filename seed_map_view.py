@@ -17,7 +17,7 @@ from app_info import ASSETS, DATA_DIR
 from navigation import guidance, world_key
 from game_window import MinecraftWindow, client_area
 from seed_map import APP_NAME, FULLSCREEN_MODES, MAP_ZOOM_COMMANDS, VERSIONS, map_url
-from status_popup import BORDER, RADIUS, SURFACE, overlay_box
+from status_popup import BORDER, EDGE, RADIUS, SURFACE, overlay_box
 
 
 OVERLAY_ALPHA = 210  # 82% opacity on the Windows layered window.
@@ -32,22 +32,39 @@ MINIMAP = """
     const map = document.querySelector('[data-testid="map-container"]');
     if (!map || !map.querySelector('canvas')) return false;
     const canvasBox = map.parentElement;
-    for (const [key, value] of Object.entries({
-        position: 'fixed', inset: '0', margin: '0', border: '0',
-        width: '100vw', height: '100vh', 'min-height': '0',
-        'max-height': 'none', 'max-width': 'none', 'z-index': '2147483645',
-    })) canvasBox.style.setProperty(key, value, 'important');
     canvasBox.dataset.bobberMap = '';
+    const app = map.closest('astro-island') || canvasBox.parentElement.parentElement;
+    app.dataset.bobberApp = '';
+    for (let node = app; node && node !== document.body; node = node.parentElement)
+        node.dataset.bobberAppPath = '';
     for (let node = canvasBox; node && node !== document.body; node = node.parentElement)
         node.dataset.bobberMapPath = '';
     if (!document.getElementById('bobberbuddy-style')) {
         const css = document.createElement('style');
         css.id = 'bobberbuddy-style';
         css.textContent = `
-            body { overflow: hidden !important; }
-            body > :not([data-bobber-map-path], #bobberbuddy-position),
-            [data-bobber-map-path]:not([data-bobber-map]) > :not([data-bobber-map-path]) {
+            html:not([data-bobber-edit]) body { overflow: hidden !important; }
+            html:not([data-bobber-edit]) body > :not([data-bobber-map-path], #bobberbuddy-position),
+            html:not([data-bobber-edit]) [data-bobber-map-path]:not([data-bobber-map]) > :not([data-bobber-map-path]) {
                 display: none !important;
+            }
+            html:not([data-bobber-edit]) [data-bobber-map] {
+                position: fixed !important; inset: 0 !important; margin: 0 !important; border: 0 !important;
+                width: 100vw !important; height: 100vh !important; min-height: 0 !important;
+                max-height: none !important; z-index: 2147483645 !important;
+            }
+            html[data-bobber-edit] body { overflow-y: auto !important; margin: 0 !important; }
+            html[data-bobber-edit] :is(body, [data-bobber-app-path]:not([data-bobber-app]))
+                > :not([data-bobber-app-path], [data-base-ui-portal], [data-radix-portal], [role="dialog"],
+                       :has([role="dialog"], [role="listbox"], [role="menu"])) {
+                display: none !important;
+            }
+            html[data-bobber-edit] [data-bobber-app-path]:not([data-bobber-app]) {
+                width: auto !important; max-width: none !important;
+                margin: 0 !important; padding: 4px !important;
+            }
+            html[data-bobber-edit] [data-bobber-map] {
+                height: clamp(210px, 52vh, 500px) !important; min-height: 0 !important;
             }
             iframe, ins.adsbygoogle, [data-ad-slot], [data-ad-client] {
                 display: none !important;
@@ -95,6 +112,33 @@ OVERLAY_STYLE = f"""
     return true;
 }})()
 """
+
+
+def set_map_editing(window, editing):
+    execute(window, f"""(() => {{
+        document.documentElement.toggleAttribute('data-bobber-edit', {json.dumps(editing)});
+        window.scrollTo(0, 0);
+        window.dispatchEvent(new Event('resize'));
+    }})()""")
+
+
+class PauseMap:
+    """Open only after Escape from gameplay releases the game cursor."""
+
+    def __init__(self):
+        self.editing = False
+        self.until = float("-inf")
+
+    def update(self, command, *, foreground, captured, now):
+        if not foreground or command == "pause_close" or (captured and self.editing):
+            self.editing = False
+            self.until = float("-inf")
+        elif command == "pause_open":
+            self.until = now + 1
+        if foreground and not captured and now <= self.until:
+            self.editing = True
+            self.until = float("-inf")
+        return self.editing
 
 
 def execute(window, script):
@@ -238,7 +282,7 @@ def map_world(window):
     """)
 
 
-async def follow(views, config, stopping, zoom_requests=None):
+async def follow(views, config, stopping, zoom_requests=None, pause_requests=None):
     game = MinecraftWindow(config["edition"])
     reader = None
     try:
@@ -251,7 +295,10 @@ async def follow(views, config, stopping, zoom_requests=None):
     pending_reads = 0
     confirmation_misses = 0
     misses = 0
-    overlay_bounds = object()
+    overlay_state = None
+    pause = PauseMap()
+    editing_by_view = {}
+    has_overlay = any(overlay for _, overlay, _ in views)
     initialized = set()
     current_center = {}
     shown_status = {}
@@ -274,12 +321,18 @@ async def follow(views, config, stopping, zoom_requests=None):
             delay = 0.23
             hwnd = game.foreground_game()
             bounds = client_area(hwnd) if hwnd else None
-            if bounds != overlay_bounds:
+            command = None
+            while pause_requests:
+                command = pause_requests.popleft()
+            editing = has_overlay and pause.update(command, foreground=bounds is not None,
+                                                   captured=bool(hwnd and game.focused()),
+                                                   now=time.monotonic())
+            if (bounds, editing) != overlay_state:
                 for window, overlay, _ in active:
                     if overlay and window.events.shown.is_set():
-                        position_overlay(window, bounds)
-                if all(window.events.shown.is_set() for window, _, _ in active):
-                    overlay_bounds = bounds
+                        position_overlay(window, bounds, editing=editing, edition=config["edition"])
+                if all(window.events.shown.is_set() for window, overlay, _ in active if overlay):
+                    overlay_state = (bounds, editing)
             for window, overlay, _ in active:
                 if window.uid in initialized or not window.events.shown.is_set():
                     continue
@@ -295,6 +348,10 @@ async def follow(views, config, stopping, zoom_requests=None):
                         show_status(window, f"{world_label} · Waiting for Minecraft coordinates" if reader is not None
                                    else f"{world_label} · Windows OCR unavailable")
             ready = [(window, overlay) for window, overlay, _ in active if window.uid in initialized]
+            for window, overlay in ready:
+                if overlay and editing_by_view.get(window.uid, False) != editing:
+                    set_map_editing(window, editing)
+                    editing_by_view[window.uid] = editing
             while ready and zoom_requests:
                 action = zoom_requests.popleft()
                 if action.startswith("navigation "):
@@ -309,7 +366,7 @@ async def follow(views, config, stopping, zoom_requests=None):
                     else:
                         zoom_map(window, action)
             for window, overlay in ready:
-                if overlay:
+                if overlay and not editing:
                     continue
                 selection = execute(window, "(() => {const point=window.bobberDestination; delete window.bobberDestination; return point;})()")
                 if selection is not None:
@@ -319,7 +376,7 @@ async def follow(views, config, stopping, zoom_requests=None):
                                                   encoding="utf-8")
                     except OSError:
                         pass
-            if hwnd is None:
+            if hwnd is None or editing:
                 # The map can be panned while Minecraft is unfocused. Recenter after returning
                 # to the game even if the player is standing on the same block.
                 current_center.clear()
@@ -409,17 +466,20 @@ def close_views(views):
 
 def start(views, config, stopping):
     zoom_requests = deque(maxlen=32)
+    pause_requests = deque(maxlen=8)
 
     def watch_parent():
         for line in sys.stdin:
             action = line.strip()
-            if action in MAP_ZOOM_COMMANDS or action == "show_window" or action.startswith("navigation "):
+            if action in {"pause_open", "pause_close"}:
+                pause_requests.append(action)
+            elif action in MAP_ZOOM_COMMANDS or action == "show_window" or action.startswith("navigation "):
                 zoom_requests.append(action)
         stopping.set()
         close_views(views)
 
     Thread(target=watch_parent, daemon=True).start()
-    asyncio.run(follow(views, config, stopping, zoom_requests))
+    asyncio.run(follow(views, config, stopping, zoom_requests, pause_requests))
 
 
 class MonitorInfo(ctypes.Structure):
@@ -460,7 +520,7 @@ def place_map(window, display):
             user32.SetThreadDpiAwarenessContext(original_dpi)
 
 
-def configure_overlay(window):
+def configure_overlay(window, *, editing=False):
     user32 = ctypes.WinDLL("user32")
     user32.GetWindowLongPtrW.argtypes = (wintypes.HWND, ctypes.c_int)
     user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
@@ -468,12 +528,21 @@ def configure_overlay(window):
     user32.SetLayeredWindowAttributes.argtypes = (wintypes.HWND, wintypes.DWORD, wintypes.BYTE, wintypes.DWORD)
     hwnd = window.native.Handle.ToInt64()
     styles = user32.GetWindowLongPtrW(hwnd, -20)
-    # Layered + transparent passes mouse hits through the entire Windows overlay.
-    user32.SetWindowLongPtrW(hwnd, -20, styles | 0x08080020)
-    user32.SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA, 2)
+    # Keep Escape and the Minecraft menu in the game, even when the map takes clicks.
+    styles |= 0x08080000  # WS_EX_NOACTIVATE | WS_EX_LAYERED
+    styles = styles & ~0x20 if editing else styles | 0x20  # WS_EX_TRANSPARENT
+    user32.SetWindowLongPtrW(hwnd, -20, styles)
+    user32.SetLayeredWindowAttributes(hwnd, 0, 255 if editing else OVERLAY_ALPHA, 2)
 
 
-def position_overlay(window, bounds):
+def editing_box(bounds, edition):
+    width = min(780, bounds["width"] * (44 if edition == "bedrock" else 31) // 100)
+    height = min(820, bounds["height"] - 2 * EDGE)
+    return (bounds["left"] + bounds["width"] - width - EDGE,
+            bounds["top"] + (bounds["height"] - height) // 2, width, height)
+
+
+def position_overlay(window, bounds, *, editing=False, edition="bedrock"):
     from System import Action
 
     native = window.native
@@ -491,8 +560,8 @@ def position_overlay(window, bounds):
             native.Hide()
             return
         hwnd = native.Handle.ToInt64()
-        configure_overlay(window)
-        left, top, width, height = overlay_box(bounds)
+        configure_overlay(window, editing=editing)
+        left, top, width, height = editing_box(bounds, edition) if editing else overlay_box(bounds)
         original_dpi = user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
         try:
             gdi32 = ctypes.WinDLL("gdi32")

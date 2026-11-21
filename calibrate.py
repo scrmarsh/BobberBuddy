@@ -850,7 +850,7 @@ class Calibration:
             edition = self.settings.get("seed_map", {}).get("edition", self.key)
             try:
                 for action in self.zoom_keys.poll(edition):
-                    self.seed_map.zoom(action)
+                    self.seed_map.send(action)
             except OSError as error:
                 self.menu_detail.set(f"Minimap shortcuts unavailable: {error}")
         else:
