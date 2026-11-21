@@ -10,9 +10,10 @@ import cv2
 import numpy as np
 
 from app_info import ASSETS
+from bite import BiteDetector
 from calibrate import automatic_capture_area, water_in_cast_area
 from hotbar import HotbarRod
-from matcher import Matcher
+from matcher import Match, Matcher
 from navigation import guidance, world_key
 from seed_map import SeedMap, map_displays, map_url
 from seed_map_view import PauseMap, editing_box
@@ -96,6 +97,26 @@ class MapTests(unittest.TestCase):
 
 
 class FishingDefaultsTests(unittest.TestCase):
+    def test_splash_at_locked_bobber_requires_submersion(self):
+        water = np.full((100, 120, 3), (38, 43, 26), dtype=np.uint8)
+        floating = water.copy()
+        floating[33:47, 44:56] = (18, 22, 108)
+        matcher = Mock()
+        matcher.find.return_value = Match(0.98, (44, 33, 56, 47))
+        detector = BiteDetector(matcher, 0.82)
+        for tick in range(9):
+            self.assertFalse(detector.update(floating, tick / 5).bite)
+        splash = floating.copy()
+        splash[40:47, 57:63] = (220, 31, 34)
+        for x, y in ((25, 37), (68, 30), (44, 14), (67, 58)):
+            splash[y:y + 3, x:x + 3] = (220, 31, 34)
+        visible = detector.update(splash, 1.8)
+        self.assertTrue(visible.bubbles)
+        self.assertFalse(visible.bite)
+        splash[33:47, 44:56] = water[33:47, 44:56]
+        matcher.find.return_value = None
+        self.assertTrue(detector.update(splash, 2).bite)
+
     def test_vibrant_bobber_variant_stands_out_in_dark_water(self):
         vibrant = ASSETS / "bedrock-vibrant-bobber.png"
         reference = cv2.imread(str(vibrant), cv2.IMREAD_UNCHANGED)

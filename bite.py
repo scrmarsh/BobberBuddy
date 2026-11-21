@@ -162,6 +162,16 @@ class BiteDetector:
             and abs(cy - y) <= limit * 0.65
             and stats[index, cv2.CC_STAT_HEIGHT] <= max(3, 1.6 * stats[index, cv2.CC_STAT_WIDTH])
         ]
+        # The approach can be obscured by shaded water while the burst at
+        # the hook remains visible. It still needs a bobber dip or submersion.
+        splash_radius = max(32, width * 3.6)
+        cx, cy = round(x), round(y)
+        core = blue[max(0, cy - width):cy + width + 1, max(0, cx - width):cx + width + 1]
+        if (now > self.wake_until and self.float_red_pixels >= 8
+                and sum(distance <= splash_radius for distance, _, _ in particles) >= 4
+                and cv2.countNonZero(core) >= max(12, width * width * 0.25)):
+            self.arm_wake(now)
+            return
         recent = now - self.last_particle_at <= 0.45
         if not recent:
             self.wake_distance = None
@@ -190,8 +200,11 @@ class BiteDetector:
         if self.approaches >= 2 and nearest <= max(24, width * 1.6) and now > self.wake_until:
             # Only the first arrival opens the window. Repeated splashes at the
             # same distance cannot keep the detector armed indefinitely.
-            self.wake_until = now + 0.65
-            self.wake_arrived_at = now
-            self.wake_distance = None
-            self.wake_offset = None
-            self.approaches = 0
+            self.arm_wake(now)
+
+    def arm_wake(self, now):
+        self.wake_until = now + 0.65
+        self.wake_arrived_at = now
+        self.wake_distance = None
+        self.wake_offset = None
+        self.approaches = 0
