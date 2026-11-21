@@ -7,10 +7,12 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import cv2
+import numpy as np
 
 from app_info import ASSETS
-from calibrate import automatic_capture_area
+from calibrate import automatic_capture_area, water_in_cast_area
 from hotbar import HotbarRod
+from matcher import Matcher
 from navigation import guidance, world_key
 from seed_map import SeedMap, map_displays, map_url
 from seed_map_view import PauseMap, editing_box
@@ -94,6 +96,33 @@ class MapTests(unittest.TestCase):
 
 
 class FishingDefaultsTests(unittest.TestCase):
+    def test_vibrant_bobber_variant_stands_out_in_dark_water(self):
+        vibrant = ASSETS / "bedrock-vibrant-bobber.png"
+        reference = cv2.imread(str(vibrant), cv2.IMREAD_UNCHANGED)
+        box = cv2.boundingRect(reference[:, :, 3])
+        x, y, width, height = box
+        target = reference[y:y + height, x:x + width]
+        empty = np.full((60, 90, 3), (37, 42, 23), dtype=np.uint8)
+        frame = empty.copy()
+        region = frame[18:18 + height, 32:32 + width]
+        region[target[:, :, 3] > 0] = target[:, :, :3][target[:, :, 3] > 0]
+        detector = Matcher(ASSETS / "bedrock-bobber.png", variants=((vibrant, 0.89),))
+        self.assertLess(detector.find(empty).score, 0.82)
+        match = detector.find(frame)
+        self.assertGreater(match.score, 0.95)
+        self.assertEqual(match.box, (32, 18, 32 + width, 18 + height))
+
+    def test_first_cast_checks_vibrant_water_at_crosshair(self):
+        warm_stone = (16, 100, 125)
+        dark_teal_water = (80, 90, 28)
+        pond = np.full((80, 120, 3), warm_stone, dtype=np.uint8)
+        pond[26:, 20:100] = dark_teal_water
+        self.assertTrue(water_in_cast_area(cv2.cvtColor(pond, cv2.COLOR_HSV2BGR)))
+        pond[29:51, 43:77] = warm_stone
+        self.assertFalse(water_in_cast_area(cv2.cvtColor(pond, cv2.COLOR_HSV2BGR)))
+        classic = np.full_like(pond, (100, 150, 125))
+        self.assertTrue(water_in_cast_area(cv2.cvtColor(classic, cv2.COLOR_HSV2BGR)))
+
     def test_hotbar_match_survives_a_durability_bar(self):
         reference = cv2.imread(str(ASSETS / "bedrock-hotbar-rod.png"))
         slot = reference.copy()

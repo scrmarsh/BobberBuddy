@@ -17,7 +17,13 @@ def bgr(image):
 
 
 class Matcher:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, variants=()):
+        self.templates = []
+        self._add_reference(path, 0)
+        for variant, minimum in variants:
+            self._add_reference(variant, minimum)
+
+    def _add_reference(self, path: Path, minimum: float):
         with Image.open(path) as source:
             image = source.convert("RGBA")
         visible = image.getchannel("A").point(lambda alpha: 255 if alpha >= 128 else 0)
@@ -29,16 +35,17 @@ class Matcher:
         if min(image.size) < 4 or max(image.size) > 256:
             raise ValueError("Crop the template to the bobber (4 to 256 pixels per side).")
         widths = {6, 8, 10, 12, 15, 18, 22, 27, 33, 40, 48, image.width}
-        self.templates = []
+        prepared = []
         for width in sorted(widths):
             height = max(4, round(image.height * width / image.width))
             rgb = image.resize((width, height), Image.Resampling.NEAREST)
             mask = np.asarray(visible.resize((width, height), Image.Resampling.NEAREST))
             count = np.count_nonzero(mask)
             if count >= 12:
-                self.templates.append((bgr(rgb), mask, count))
-        if not self.templates:
+                prepared.append((bgr(rgb), mask, count, minimum))
+        if not prepared:
             raise ValueError("The template needs more visible pixels.")
+        self.templates.extend(prepared)
 
     def find(self, frame, region=None, expected_width=None) -> Match | None:
         left, top = 0, 0
@@ -46,7 +53,7 @@ class Matcher:
             left, top, right, bottom = region
             frame = frame[top:bottom, left:right]
         best = None
-        for template, mask, count in self.templates:
+        for template, mask, count, minimum in self.templates:
             height, width = mask.shape
             if expected_width is not None and abs(width - expected_width) > expected_width * 0.35 + 3:
                 continue
@@ -58,6 +65,6 @@ class Matcher:
             np.nan_to_num(contrast, copy=False, nan=0, posinf=0, neginf=0)
             similarity = 0.5 * color + 0.25 * (1 + np.clip(contrast, -1, 1))
             _, score, _, (x, y) = cv2.minMaxLoc(similarity)
-            if best is None or score > best.score:
+            if score >= minimum and (best is None or score > best.score):
                 best = Match(score, (x + left, y + top, x + left + width, y + top + height))
         return best

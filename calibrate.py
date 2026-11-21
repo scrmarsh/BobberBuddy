@@ -42,6 +42,16 @@ def default_template(edition):
     filename = f"{edition}-bobber.png"
     local = LOCAL / filename
     return local if local.is_file() else ASSETS / filename
+
+
+def fishing_matcher(edition, path):
+    vibrant = ASSETS / "bedrock-vibrant-bobber.png"
+    variants = ()
+    if edition == "bedrock" and path == default_template(edition) and vibrant.is_file():
+        variants = ((vibrant, 0.89),)
+    return Matcher(path, variants=variants)
+
+
 EDITIONS = {"Java Edition": "java", "Bedrock Edition": "bedrock"}
 EXAMPLE = {"java": "java.png", "bedrock": "bedrock.jpg"}
 EXAMPLE_REGION = {"java": (610, 180, 760, 320), "bedrock": (560, 420, 720, 550)}
@@ -90,6 +100,22 @@ def automatic_capture_area(bounds):
     return dict(left=bounds["left"] + (bounds["width"] - width) // 2,
                 top=bounds["top"] + (bounds["height"] - height) // 2,
                 width=width, height=height)
+
+
+def water_in_cast_area(frame):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    blue = cv2.inRange(hsv, (82, 30, 32), (132, 255, 245))
+    if cv2.countNonZero(blue) >= blue.size * 0.45:
+        return True
+    # Vibrant Visuals can shade water almost black or dark teal. Require it
+    # both under the crosshair and across the nearby foreground.
+    teal = cv2.inRange(hsv, (70, 38, 18), (112, 255, 155))
+    height, width = teal.shape
+    aim = teal[height * 3 // 8:height * 5 // 8, width * 3 // 8:width * 5 // 8]
+    foreground = teal[height // 2:, width // 4:width * 3 // 4]
+    return (aim.size > 0 and foreground.size > 0
+            and cv2.countNonZero(aim) >= aim.size * 0.72
+            and cv2.countNonZero(foreground) >= foreground.size * 0.60)
 
 
 def capture(area, matcher, stop, threshold=None):
@@ -234,9 +260,7 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                         cast_armed = False
                     if (not float_visible and (cast_armed or recovery_ready)
                             and (not automatic or uncast_rod is not None)):
-                        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                        water = cv2.inRange(hsv, (82, 30, 32), (132, 255, 245))
-                        if (np.count_nonzero(water) < water.size * 0.45
+                        if (not water_in_cast_area(frame)
                                 or (uncast_rod is not None and not stowed_hook_visible())):
                             clear_since = None
                         elif clear_since is None:
@@ -946,7 +970,7 @@ class Calibration:
 
     def load_template(self, path):
         try:
-            matcher = Matcher(path)
+            matcher = fishing_matcher(self.key, path)
         except (OSError, ValueError) as error:
             self.status.set(f"Template unavailable. Open a bobber crop. {error}")
             return
@@ -1217,6 +1241,7 @@ if __name__ == "__main__":
         root.withdraw()
         try:
             Matcher(ASSETS / "bedrock-bobber.png")
+            Matcher(ASSETS / "bedrock-vibrant-bobber.png")
             Matcher(ASSETS / "java-bobber.png")
             hotbar = cv2.imread(str(ASSETS / "bedrock-hotbar-rod.png"))
             muted = cv2.imread(str(ASSETS / "bedrock-muted-rod.png"))
