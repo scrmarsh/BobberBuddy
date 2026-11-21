@@ -4,7 +4,7 @@ Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It
 
 **[Download Bobber Buddy for Windows](https://github.com/scrmarsh/BobberBuddy/releases/latest)**
 
-Latest release **v1.0.2** adds first-run Bedrock auto-fishing with bundled references for both standard rendering and Vibrant Visuals.
+Latest release **v1.0.3** improves automatic casting and pauses when you move or switch tools. It also adds automatic Windows updates.
 
 ## What it does
 
@@ -32,6 +32,7 @@ If a spot gives false bites or fails to track the float, use **Sample region (12
 The Windows package saves settings and session logs under `%LOCALAPPDATA%\Bobber Buddy`.
 
 Starting with v1.0.3, the Windows package can install verified updates and restart automatically when fishing and calibration are idle. **Settings → Updates → Open downloads folder** opens the actual download location.
+If you are upgrading from v1.0.2, download and extract the full ZIP once to get the automatic installer.
 
 ## Optional seed minimap
 
