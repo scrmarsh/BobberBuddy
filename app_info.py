@@ -8,5 +8,11 @@ VERSION = "1.0.2"
 RELEASE_REPOSITORY = "scrmarsh/BobberBuddy"
 ROOT = Path(__file__).resolve().parent
 FROZEN = getattr(sys, "frozen", False)
-DATA_DIR = Path(os.environ["LOCALAPPDATA"]) / "Bobber Buddy" if FROZEN else ROOT / ".local"
 ASSETS = ROOT / "assets"
+
+if FROZEN:
+    bundle = Path(sys.executable).parent
+    DATA_DIR = (bundle / "profile" if (bundle / "portable.flag").is_file()
+                else Path(os.environ["LOCALAPPDATA"]) / APP_NAME)
+else:
+    DATA_DIR = ROOT / ".local"
