@@ -9,6 +9,10 @@ USER32.GetForegroundWindow.restype = win.HWND
 USER32.GetWindowThreadProcessId.argtypes = (win.HWND, ctypes.POINTER(win.DWORD))
 USER32.GetClassNameW.argtypes = (win.HWND, win.LPWSTR, ctypes.c_int)
 USER32.GetWindowTextW.argtypes = (win.HWND, win.LPWSTR, ctypes.c_int)
+USER32.IsIconic.argtypes = (win.HWND,)
+USER32.IsWindowVisible.argtypes = (win.HWND,)
+ENUM_WINDOWS = ctypes.WINFUNCTYPE(win.BOOL, win.HWND, win.LPARAM)
+USER32.EnumWindows.argtypes = (ENUM_WINDOWS, win.LPARAM)
 USER32.GetClientRect.argtypes = (win.HWND, ctypes.POINTER(win.RECT))
 USER32.ClientToScreen.argtypes = (win.HWND, ctypes.POINTER(win.POINT))
 KERNEL32.OpenProcess.argtypes = (win.DWORD, win.BOOL, win.DWORD)
@@ -61,13 +65,31 @@ class MinecraftWindow:
 
     def foreground_game(self):
         hwnd = USER32.GetForegroundWindow()
-        if not hwnd:
+        if not hwnd or USER32.IsIconic(hwnd) or not USER32.IsWindowVisible(hwnd):
             return None
         identity = (hwnd, process_id(hwnd))
         if identity != self.identity:
             self.identity = identity
             self.recognized = self.is_minecraft(*identity)
         return hwnd if self.recognized else None
+
+    def visible_game(self):
+        hwnd = self.foreground_game()
+        if hwnd is not None:
+            return hwnd
+        found = None
+
+        @ENUM_WINDOWS
+        def find(hwnd, _):
+            nonlocal found
+            if (USER32.IsWindowVisible(hwnd) and not USER32.IsIconic(hwnd)
+                    and self.is_minecraft(hwnd, process_id(hwnd))):
+                found = hwnd
+                return False
+            return True
+
+        USER32.EnumWindows(find, 0)
+        return found
 
     def focused(self):
         hwnd = self.foreground_game()
@@ -78,8 +100,10 @@ class MinecraftWindow:
         if not USER32.GetCursorInfo(ctypes.byref(cursor)) or cursor.flags & 1:
             return False
         bounds = client_area(hwnd)
-        if bounds is None:
+        if bounds is None or bounds["width"] < 1 or bounds["height"] < 1:
             return False
+        if self.area is None:
+            return True
         left, top = self.area["left"], self.area["top"]
         return (bounds["left"] <= left and left + self.area["width"] <= bounds["left"] + bounds["width"]
                 and bounds["top"] <= top and top + self.area["height"] <= bounds["top"] + bounds["height"])
@@ -105,7 +129,7 @@ class MinecraftWindow:
         return (executable in {"java.exe", "javaw.exe"} and name.value in {"GLFW30", "LWJGL"}
                 and title.value.casefold().startswith("minecraft"))
 
-    def reel(self, stop):
+    def use_rod(self, stop):
         target = self.identity
         down = Input(0, MouseInput(flags=RIGHT_DOWN))
         up = Input(0, MouseInput(flags=RIGHT_UP))
