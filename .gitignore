@@ -1,5 +1,7 @@
 .local/
 .venv/
+build/
+dist/
 __pycache__/
 concepts/
 assets/bobber.png

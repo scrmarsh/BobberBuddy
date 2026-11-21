@@ -1,2 +1,2 @@
 @echo off
-call "%~dp0seedside.cmd"
+call "%~dp0bobberbuddy.cmd"

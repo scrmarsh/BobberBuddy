@@ -3,15 +3,19 @@ import json
 import re
 import subprocess
 import sys
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 from urllib.parse import urlencode
 
 import mss
+from app_info import APP_NAME, DATA_DIR, FROZEN
+from navigation import world_key
 
 
 MAP_URL = "https://www.chunkbase.com/apps/seed-map"
+MAP_ZOOM_COMMANDS = {"zoom_in": "Zoom in", "zoom_out": "Zoom out"}
 VERSIONS = {
     "bedrock": {
         "26.60–26.65": "bedrock_26_60",
@@ -46,8 +50,9 @@ VERSIONS = {
     },
 }
 DIMENSIONS = {"Overworld": "overworld", "Nether": "nether", "End": "end"}
-MAP_MODES = {"Second display · full screen": "display", "In-game overlay · bottom right": "overlay",
-             "Both views": "both"}
+MAP_MODES = {"In-Game Overlay": "overlay", "Separate Window": "window", "Both": "both",
+             "Second display · full screen": "display"}
+FULLSCREEN_MODES = {"display"}
 
 
 def world_seed(value):
@@ -71,10 +76,10 @@ def coordinate(value):
     return int(value)
 
 
-def map_url(config):
+def map_url(config, *, overlay=False):
     center = dict(x=config["x"], z=config["z"]) if config["x"] is not None else {}
     state = dict(seed=config["seed"], platform=VERSIONS[config["edition"]][config["version"]],
-                 dimension=DIMENSIONS[config["dimension"]], zoom=0.55, **center)
+                 dimension=DIMENSIONS[config["dimension"]], zoom=0.42 if overlay else 0.55, **center)
     return f"{MAP_URL}#{urlencode(state)}"
 
 
@@ -101,12 +106,116 @@ class SeedMap:
         self.save = save
         self.monitor = monitor
         self.process = None
+        self.mode = None
+
+    def open_startup_overlay(self):
+        stored = self.settings.get("seed_map", {})
+        if not stored.get("seed") or not stored.get("enabled", stored.get("startup_overlay", True)):
+            return
+        with mss.MSS() as screen:
+            displays = list(screen.monitors[1:])
+        display = default_display(displays, self.monitor(), stored.get("display"))
+        if self.process is None:
+            mode = stored.get("mode", "overlay")
+            if mode == "display" and len(displays) < 2:
+                mode = "window"
+            self.launch(dict(stored, mode=mode), display)
+
+    def open_window(self, edition):
+        stored = self.settings.get("seed_map", {})
+        if not stored.get("seed"):
+            self.open_settings(edition)
+            return
+        if self.is_open() and self.mode != "overlay":
+            self.send("show_window")
+            return
+        mode = "both" if self.is_open() else "window"
+        self.close()
+        self.settings["seed_map"] = dict(stored, enabled=True, mode=mode)
+        self.open_startup_overlay()
+        self.save()
+
+    def open_waypoints(self):
+        config = self.settings.get("seed_map", {})
+        if not config.get("seed"):
+            self.open_settings("Bedrock Edition")
+            return
+        key = json.dumps(world_key(config), ensure_ascii=False)
+        routes = self.settings.setdefault("navigation", {})
+        route = routes.setdefault(key, {"waypoints": {}, "radius": 8})
+        points = route["waypoints"]
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"{APP_NAME} Waypoints")
+        panel = ttk.Frame(dialog, padding=16)
+        panel.pack(fill="both", expand=True)
+        name, x, z = (tk.StringVar() for _ in range(3))
+        radius = tk.StringVar(value=route.get("radius", 8))
+        status = tk.StringVar()
+        for caption, value in (("Name", name), ("X", x), ("Z", z), ("Arrival radius", radius)):
+            row = ttk.Frame(panel)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=caption, width=13).pack(side="left")
+            ttk.Entry(row, textvariable=value).pack(side="left", fill="x", expand=True)
+        chooser = ttk.Combobox(panel, values=sorted(points), state="readonly")
+        chooser.pack(fill="x", pady=8)
+
+        def select(_=None):
+            if chooser.get() in points:
+                name.set(chooser.get())
+                px, pz = points[chooser.get()]
+                x.set(px)
+                z.set(pz)
+
+        chooser.bind("<<ComboboxSelected>>", select)
+
+        def change(action):
+            try:
+                if action == "current":
+                    fix = json.loads((DATA_DIR / "player-position.json").read_text(encoding="utf-8"))
+                    if tuple(fix["world"]) != world_key(config) or time.time() - fix["observed"] > 10:
+                        raise ValueError("Wait for the map to read coordinates in this world.")
+                    x.set(fix["position"][0])
+                    z.set(fix["position"][1])
+                    return
+                if action == "clear":
+                    route.pop("destination", None)
+                elif action == "delete":
+                    points.pop(chooser.get() or name.get(), None)
+                    chooser.set("")
+                else:
+                    position = [coordinate(x.get()), coordinate(z.get())]
+                    distance = coordinate(radius.get())
+                    if not 1 <= distance <= 1000:
+                        raise ValueError("Set an arrival radius from 1 to 1,000 blocks.")
+                    route["radius"] = distance
+                    if action == "save":
+                        label = name.get().strip()
+                        if not label or len(label) > 64:
+                            raise ValueError("Enter a waypoint name of up to 64 characters.")
+                        if chooser.get() and chooser.get() != label:
+                            points.pop(chooser.get(), None)
+                        points[label] = position
+                        chooser.set(label)
+                    else:
+                        route["destination"] = dict(position=position, name=name.get().strip())
+                chooser.configure(values=sorted(points))
+                self.save()
+                self.send("navigation " + json.dumps(route))
+                status.set("Saved.")
+            except (OSError, ValueError, KeyError) as error:
+                status.set(str(error))
+
+        for title, action in (("Use current coordinates", "current"), ("Save waypoint", "save"),
+                              ("Delete selected waypoint", "delete"), ("Start navigation", "start"),
+                              ("Cancel navigation", "clear")):
+            ttk.Button(panel, text=title, command=lambda value=action: change(value)).pack(fill="x", pady=2)
+        ttk.Label(panel, textvariable=status, wraplength=300).pack(fill="x")
 
     def open_settings(self, edition):
         with mss.MSS() as screen:
             displays = list(screen.monitors[1:])
         dialog = tk.Toplevel(self.root)
-        dialog.title("Seedside Seed Map")
+        dialog.title(f"{APP_NAME} Minimap")
         dialog.transient(self.root)
         panel = ttk.Frame(dialog, padding=20)
         panel.pack(fill="both", expand=True)
@@ -127,7 +236,9 @@ class SeedMap:
         x = tk.StringVar(value="" if stored.get("x") is None else stored["x"])
         z = tk.StringVar(value="" if stored.get("z") is None else stored["z"])
         follow = tk.BooleanVar(value=stored.get("follow", True))
-        mode_choices = list(MAP_MODES) if len(displays) > 1 else [list(MAP_MODES)[1]]
+        enabled = tk.BooleanVar(value=stored.get("enabled", stored.get("startup_overlay", True)))
+        mode_choices = [label for label, key in MAP_MODES.items()
+                        if len(displays) > 1 or key not in FULLSCREEN_MODES]
         mode = tk.StringVar(value=next((label for label in mode_choices
                                         if MAP_MODES[label] == stored.get("mode")), mode_choices[0]))
         display_name = tk.StringVar()
@@ -167,19 +278,21 @@ class SeedMap:
         place(5, "Full-screen display", display_picker)
 
         def refresh_display(_=None):
-            display_picker.configure(state="disabled" if MAP_MODES[mode.get()] == "overlay" else "readonly")
+            display_picker.configure(state="readonly" if MAP_MODES[mode.get()] in FULLSCREEN_MODES else "disabled")
 
         mode_picker.bind("<<ComboboxSelected>>", refresh_display)
         refresh_display()
         place(6, "Map center", coordinates)
         ttk.Checkbutton(panel, text="Follow coordinates shown in Minecraft", variable=follow).grid(
             row=7, column=0, columnspan=2, sticky="w", pady=(8, 4))
+        ttk.Checkbutton(panel, text="Minimap enabled", variable=enabled).grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=(0, 4))
         ttk.Label(panel, text="Show Coordinates in Bedrock · F3 in Java", wraplength=335).grid(
-            row=8, column=0, columnspan=2, sticky="w")
+            row=9, column=0, columnspan=2, sticky="w")
         ttk.Label(panel, text="The online Chunk Base map uses your seed and X/Z.", wraplength=335).grid(
-            row=9, column=0, columnspan=2, sticky="w", pady=(5, 0))
-        ttk.Label(panel, textvariable=error, foreground="#ffbb91", wraplength=335).grid(
             row=10, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        ttk.Label(panel, textvariable=error, foreground="#ffbb91", wraplength=335).grid(
+            row=11, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         def launch():
             try:
@@ -191,12 +304,17 @@ class SeedMap:
                 if display is None:
                     raise ValueError("Choose a display for the mini-map.")
                 selected_mode = MAP_MODES[mode.get()]
-                if selected_mode != "overlay" and game_display and display_key(display) == display_key(game_display):
+                if (selected_mode in FULLSCREEN_MODES and game_display
+                        and display_key(display) == display_key(game_display)):
                     raise ValueError("Choose a different display for the full-screen map.")
                 config = dict(seed=world_seed(seed.get()), edition=editions[selection.get()],
                               version=version.get(), dimension=dimension.get(), x=center[0], z=center[1],
-                              follow=follow.get(), display=display_key(display), mode=selected_mode)
-                self.launch(config, display)
+                              follow=follow.get(), display=display_key(display), mode=selected_mode,
+                              enabled=enabled.get())
+                if enabled.get():
+                    self.launch(config, display)
+                else:
+                    self.close()
             except (OSError, ValueError) as exc:
                 error.set(str(exc))
                 return
@@ -205,8 +323,8 @@ class SeedMap:
             dialog.destroy()
 
         actions = ttk.Frame(panel)
-        actions.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        ttk.Button(actions, text="Open map", style="Accent.TButton", command=launch).pack(
+        actions.grid(row=12, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Button(actions, text="Apply map settings", style="Accent.TButton", command=launch).pack(
             side="right", fill="x", expand=True)
         if self.process is not None and self.process.poll() is None:
             def close_maps():
@@ -223,17 +341,39 @@ class SeedMap:
             raise ValueError("Install the optional Seed Map dependencies listed in the README.")
         self.close()
         script = Path(__file__).with_name("seed_map_view.py")
-        log = Path(__file__).parent / ".local" / "seed-map.log"
+        log = DATA_DIR / "seed-map.log"
+        command = [sys.executable, "--map-worker" if FROZEN else str(script)]
         log.parent.mkdir(exist_ok=True)
         with log.open("wb") as diagnostics:
             self.process = subprocess.Popen(
-                [sys.executable, str(script)], stdin=subprocess.PIPE, stdout=diagnostics, stderr=diagnostics,
+                command, stdin=subprocess.PIPE, stdout=diagnostics, stderr=diagnostics,
                 text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW,
             )
-        self.process.stdin.write(json.dumps(dict(config, target_display=display)) + "\n")
+        navigation = self.settings.get("navigation", {}).get(json.dumps(world_key(config), ensure_ascii=False), {})
+        self.process.stdin.write(json.dumps(dict(config, target_display=display, navigation=navigation)) + "\n")
         self.process.stdin.flush()
+        self.mode = config["mode"]
 
     def close(self):
         if self.process is not None:
-            self.process.stdin.close()
+            process = self.process
             self.process = None
+            try:
+                process.stdin.close()
+            except BrokenPipeError:
+                pass
+
+    def zoom(self, action):
+        self.send(action)
+
+    def send(self, action):
+        if not self.is_open():
+            return
+        try:
+            self.process.stdin.write(action + "\n")
+            self.process.stdin.flush()
+        except BrokenPipeError:
+            pass
+
+    def is_open(self):
+        return self.process is not None and self.process.poll() is None
