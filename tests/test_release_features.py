@@ -244,10 +244,18 @@ class FishingDefaultsTests(unittest.TestCase):
             bounds = dict(left=-width, top=20, width=width, height=height)
             area = automatic_capture_area(bounds)
             self.assertEqual(area["left"] + area["width"] // 2, -width // 2)
-            self.assertEqual(area["top"] + area["height"] // 2, 20 + height // 2)
+            crosshair = 20 + height // 2
+            self.assertLess(area["top"], crosshair)
+            self.assertGreater(area["top"] + area["height"], crosshair)
+            self.assertLess(area["top"] + area["height"] // 2, crosshair)
             self.assertLessEqual(area["width"], 640)
             self.assertLessEqual(area["height"], 480)
         self.assertIsNone(automatic_capture_area(None))
+
+    def test_laptop_far_float_and_crosshair_are_both_in_capture(self):
+        area = automatic_capture_area(dict(left=0, top=0, width=1920, height=1080))
+        self.assertLessEqual(area['top'], 320)
+        self.assertGreaterEqual(area['top']+area['height'], 540)
 
 
 class MapPauseTests(unittest.TestCase):

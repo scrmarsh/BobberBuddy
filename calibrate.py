@@ -27,6 +27,7 @@ from matcher import Matcher, bgr
 from seed_map import APP_NAME, MAP_ZOOM_COMMANDS, SeedMap, coordinate
 from status_popup import FishingState, FishingStatusPopup
 from app_info import ASSETS, DATA_DIR, FROZEN, VERSION
+from fishing_audit import FishingAudit
 from navigation import guidance, world_key
 from updates import (RELEASE_NOTES_URL, download_release, downloads_directory, is_update,
                      latest_release, release_asset, start_installer, update_result)
@@ -104,7 +105,7 @@ def automatic_capture_area(bounds):
     width = min(640, bounds["width"] * 3 // 10)
     height = min(480, bounds["height"] * 2 // 5)
     return dict(left=bounds["left"] + (bounds["width"] - width) // 2,
-                top=bounds["top"] + (bounds["height"] - height) // 2,
+                top=bounds["top"] + bounds["height"] // 2 - height * 3 // 4,
                 width=width, height=height)
 
 
@@ -162,7 +163,7 @@ def capture_rod_reference(edition, stop):
         return slot, Image.frombytes("RGB", shot.size, shot.rgb)
 
 
-def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None, uncast_rod=None):
+def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None, uncast_rod=None, audit=None):
     automatic = area is None
     reels = 0
     bites = 0
@@ -277,11 +278,21 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                 acquisition_region = None
                 if automatic:
                     height, width = frame.shape[:2]
-                    acquisition_region = (width // 5, height // 6, width * 4 // 5, height * 5 // 6)
+                    acquisition_region = (width // 5, 0, width * 4 // 5, height * 5 // 6)
                 event = replace(detector.update(frame, now, acquisition_region=acquisition_region),
                                 locked=detector.stable >= 4)
+                if audit is not None:
+                    audit.observe(frame, event, detector)
                 if auto_reel:
                     float_visible = event.locked or (event.match is not None and event.match.score >= detector.threshold)
+                    # A positively identified stowed hook proves our line is in.
+                    # Water/crosshair false matches or another player's float
+                    # must not suppress the first cast in that state.
+                    stowed = uncast_rod is not None and stowed_hook_visible()
+                    if stowed:
+                        float_visible = False
+                        event = replace(event, match=None, locked=False, bite=False, bubbles=False)
+                        detector.reset()
                     recovery_ready = uncast_rod is not None and now - last_cast_attempt >= 5
                     if float_visible:
                         clear_since = None
@@ -294,7 +305,7 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                         elif not (cast_armed or recovery_ready):
                             clear_since = None
                             event = replace(event, waiting="Looking for the cast bobber.")
-                        elif uncast_rod is not None and not stowed_hook_visible():
+                        elif uncast_rod is not None and not stowed:
                             clear_since = None
                             event = replace(event, waiting="Checking whether the line is already out.")
                         elif clear_since is None:
@@ -309,11 +320,19 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                                 detector.reset()
                 if event.bite:
                     bites += 1
-                    if auto_reel and use_verified_rod():
+                    if audit is not None and auto_reel:
+                        audit.before_reel(screen, client_area(game.identity[0]), reels + 1)
+                    clicked = auto_reel and use_verified_rod()
+                    if audit is not None and auto_reel:
+                        audit.reel(reels + 1, clicked, frame_to_input_ms=round((time.monotonic()-now)*1000))
+                    if clicked:
                         reels += 1
                         recast_target = game.identity
                         recast_at = time.monotonic() + RECAST_DELAY
-            latest.append(replace(event, reels=reels, bites=bites, recasts=recasts, casts=casts))
+            event = replace(event, reels=reels, bites=bites, recasts=recasts, casts=casts)
+            latest.append(event)
+            if audit is not None:
+                audit.tick(screen, client_area(game.identity[0]) if focused else None, event)
             stop.wait(max(0, INTERVAL - (time.monotonic() - now)))
     return FishingFrame(None, reels=reels, bites=bites, recasts=recasts, casts=casts)
 
@@ -869,7 +888,8 @@ class Calibration:
                              "Return to Minecraft to check the bobber.")
         self.detection = self.pool.submit(watch, area, BiteDetector(self.matcher, self.threshold.get()),
                                           MinecraftWindow(self.key, area), self.reeling,
-                                          self.detect_stop, self.matches, rod, held_rod, uncast_rod)
+                                          self.detect_stop, self.matches, rod, held_rod, uncast_rod,
+                                          FishingAudit(LOCAL) if reeling and os.environ.get("BOBBER_BUDDY_AUDIT") == "1" else None)
         if self.reeling:
             self.set_fishing_state(FishingState.VERIFYING)
         return True

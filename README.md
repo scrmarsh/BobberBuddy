@@ -4,7 +4,7 @@ Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It
 
 **[Download Bobber Buddy for Windows](https://github.com/scrmarsh/BobberBuddy/releases/latest)**
 
-Latest release **v1.0.4** improves rod and bobber detection in windowed Bedrock, keeps the recast queued through brief rod-detection drops, and uses one fishing notification.
+Latest release **v1.0.5** fixes clipped bobber tracking on laptop displays, early reels during splashes, automatic first-cast recovery, and a minimap that only filled half its square.
 
 ## What it does
 
@@ -30,6 +30,8 @@ In Bedrock Edition with the default textures, open the app, equip your rod, and 
 If a spot gives false bites or fails to track the float, use **Sample region (12s)** in **Calibrate** and review the replay. Adjust **Minimum match score** so the real bobber is detected more reliably than empty water. Recalibrate when the saved screen region no longer lines up with your fishing spot.
 
 The Windows package saves settings and session logs under `%LOCALAPPDATA%\Bobber Buddy`.
+
+For a supervised diagnostic run, launch with the environment variable `BOBBER_BUDDY_AUDIT=1`. This saves local HUD images, failed-bite replay frames, and a live reward-evidence counter under the profile's `fishing-audit` folder. Reel inputs alone are not catches; the counter looks for an XP-bar or hotbar reward change. Recording is disabled by default and should be used for bounded tests rather than unattended fishing.
 
 To test from a fresh profile, extract the ZIP to a new folder and create an empty file named `portable.flag` beside **Bobber Buddy.exe** before launching. That copy saves its data in its own `profile` folder.
 

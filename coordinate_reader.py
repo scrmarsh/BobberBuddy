@@ -45,6 +45,15 @@ def bedrock_hud_rows(gray):
         columns = np.flatnonzero(bright[top:bottom].any(axis=0))
         if not len(columns) or columns[0] > 24:
             continue
+        # Keep the whole coordinate line. Wide spaces between numbers can
+        # otherwise be mistaken for the end of the HUD and discard Z.
+        padding = max(8, round(height * 0.6))
+        a, b = max(0, top - padding), min(gray.shape[0], bottom + padding)
+        line = gray[a:b]
+        for factor in (1.0, 0.85, 1.15):
+            smooth = cv2.GaussianBlur(line, (0, 0), max(0.6, height / 23 * factor))
+            yield smooth
+            yield cv2.threshold(smooth, 150, 255, cv2.THRESH_BINARY_INV)[1]
         gaps = np.flatnonzero(np.diff(columns) > max(12, height * 0.8))
         end = columns[gaps[0]] if len(gaps) else columns[-1]
         if end < height * 8:

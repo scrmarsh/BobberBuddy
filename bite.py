@@ -123,7 +123,16 @@ class BiteDetector:
                 self.anchor = hit.box
             return FishingFrame(hit, bubbles=bubbles)
 
-        wake_and_submerged = bubbles and not visible
+        # A splash can lower template confidence while the float is still
+        # above water. Confidence loss alone is not submersion.
+        patch = frame[y1:y2, x1:x2].astype(np.int16)
+        blue, green, red = cv2.split(patch)
+        current_red = np.count_nonzero((red - green > 17) & (red - blue > 16))
+        red_submerged = self.float_red_pixels < 8 or current_red <= self.float_red_pixels * 0.25
+        wake_and_submerged = bubbles and not visible and red_submerged
+        if self.stable >= 4 and settled and bubbles and not visible and not red_submerged:
+            self.weak_frames = 0
+            return FishingFrame(hit, bubbles=True)
         if (self.stable >= 4 and settled and visible and aligned and dy > 0
                 and (bubbles and not dipped or late_wake and not deep_dip)):
             # A float can move through the gap between its resting tolerance

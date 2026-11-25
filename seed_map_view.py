@@ -96,6 +96,19 @@ MINIMAP = """
         });
         setTimeout(() => window.dispatchEvent(new Event('resize')), 0);
     }
+    window.bobberLayout = () => {
+        const editing = document.documentElement.hasAttribute('data-bobber-edit');
+        for (const [key, value] of Object.entries({
+            position: editing ? 'relative' : 'fixed', inset: editing ? 'auto' : '0',
+            width: editing ? '100%' : '100vw',
+            height: editing ? 'clamp(210px, 52vh, 500px)' : '100vh',
+            'min-height': '0', 'max-height': 'none', margin: '0',
+        })) canvasBox.style.setProperty(key, value, 'important');
+        map.style.setProperty('height', '100%', 'important');
+        map.style.setProperty('width', '100%', 'important');
+    };
+    window.bobberLayout();
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 0);
     return true;
 })()
 """
@@ -117,6 +130,7 @@ OVERLAY_STYLE = f"""
 def set_map_editing(window, editing):
     execute(window, f"""(() => {{
         document.documentElement.toggleAttribute('data-bobber-edit', {json.dumps(editing)});
+        window.bobberLayout?.();
         window.scrollTo(0, 0);
         window.dispatchEvent(new Event('resize'));
     }})()""")
