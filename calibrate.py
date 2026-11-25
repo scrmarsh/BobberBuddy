@@ -52,9 +52,11 @@ def fishing_matcher(edition, path):
         variants = ((ASSETS / "bedrock-vibrant-bobber.png", 0.89),
                     (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91),
                     (ASSETS / "bedrock-vibrant-level-bobber.png", 0.92),
+                    (ASSETS / "bedrock-topdown-bobber.png", 0.89),
                     (ASSETS / "bedrock-ocean-bobber.png", 0.84))
         variants = tuple((reference, minimum) for reference, minimum in variants if reference.is_file())
-    return Matcher(path, variants=variants)
+    return Matcher(path, variants=variants, fast_acquisition=edition == "bedrock",
+                   require_red=edition == "bedrock" and path == default_template(edition))
 
 
 EDITIONS = {"Java Edition": "java", "Bedrock Edition": "bedrock"}
@@ -109,17 +111,21 @@ def automatic_capture_area(bounds):
                 width=width, height=height)
 
 
-def water_in_cast_area(frame):
+def camera_moved(previous, current):
+    return previous is not None and np.mean(np.max(cv2.absdiff(previous, current), axis=2) > 40) > 0.28
+
+
+def water_in_cast_area(frame, aim_fraction=0.5):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     blue = cv2.inRange(hsv, (82, 30, 32), (132, 255, 245))
-    if cv2.countNonZero(blue) >= blue.size * 0.45:
-        return True
     # Vibrant Visuals can shade water almost black or dark teal. Require it
     # both under the crosshair and across the nearby foreground.
     teal = cv2.inRange(hsv, (70, 38, 18), (112, 255, 155))
+    teal = cv2.bitwise_or(teal, blue)
     height, width = teal.shape
-    aim = teal[height * 3 // 8:height * 5 // 8, width * 3 // 8:width * 5 // 8]
-    foreground = teal[height // 2:, width // 4:width * 3 // 4]
+    aim_y = round(height * aim_fraction)
+    aim = teal[max(0, aim_y-height//8):min(height, aim_y+height//8), width * 3 // 8:width * 5 // 8]
+    foreground = teal[aim_y:, width // 4:width * 3 // 4]
     if not aim.size or not foreground.size:
         return False
     aim_coverage = cv2.countNonZero(aim) / aim.size
@@ -176,6 +182,8 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
     cast_armed = True
     last_cast_attempt = float("-inf")
     movement_until = 0
+    previous_scene = None
+    recovery_probe_used = False
     with mss.MSS() as screen:
         def rod_selected():
             if rod is None:
@@ -212,8 +220,10 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
             now = time.monotonic()
             event = FishingFrame(None)
             focused = game.focused()
+            frame = None
             if auto_reel and focused and game.movement_pressed():
                 movement_until = now + MOVEMENT_SETTLE
+                recovery_probe_used = False
             if automatic:
                 next_area = automatic_capture_area(client_area(game.identity[0])) if focused else None
                 if area != next_area:
@@ -222,6 +232,19 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                     recast_at = None
                     clear_since = None
                     cast_armed = True
+                    previous_scene = None
+            if auto_reel and focused and area is not None:
+                try:
+                    frame = cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR)
+                    scene = cv2.resize(frame, (96, 64), interpolation=cv2.INTER_AREA)
+                    if camera_moved(previous_scene, scene):
+                        movement_until = now + MOVEMENT_SETTLE
+                        recovery_probe_used = False
+                    previous_scene = scene
+                except mss.ScreenShotError:
+                    previous_scene = None
+            else:
+                previous_scene = None
             if not focused or area is None:
                 if recast_at is not None:
                     cast_armed = True
@@ -253,7 +276,9 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                 if now >= recast_at:
                     recast_at = None
                     try:
-                        water = water_in_cast_area(cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR))
+                        if frame is None:
+                            frame = cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR)
+                        water = water_in_cast_area(frame, 0.75 if automatic else 0.5)
                     except mss.ScreenShotError:
                         water = False
                     if water and game.identity == recast_target and use_verified_rod():
@@ -267,7 +292,8 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                     detector.reset()
             elif now >= settle_until:
                 try:
-                    frame = cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR)
+                    if frame is None:
+                        frame = cv2.cvtColor(np.asarray(screen.grab(area)), cv2.COLOR_BGRA2BGR)
                 except mss.ScreenShotError:
                     detector.reset()
                     clear_since = None
@@ -285,10 +311,20 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                     audit.observe(frame, event, detector)
                 if auto_reel:
                     float_visible = event.locked or (event.match is not None and event.match.score >= detector.threshold)
-                    # A positively identified stowed hook proves our line is in.
-                    # Water/crosshair false matches or another player's float
-                    # must not suppress the first cast in that state.
+                    # Rod references can overlap the cast pose at some angles.
+                    # A visible red float or an already detected bite takes
+                    # precedence over that ambiguous stowed-hook match.
                     stowed = uncast_rod is not None and stowed_hook_visible()
+                    if stowed and float_visible and event.match is not None:
+                        left, top, right, bottom = event.match.box
+                        patch = frame[max(0, top):bottom, max(0, left):right].astype(np.int16)
+                        if patch.size:
+                            blue, green, red = cv2.split(patch)
+                            red_pixels = np.count_nonzero((red-green > 17) & (red-blue > 16))
+                            if red_pixels >= max(6, patch.shape[0]*patch.shape[1]*0.015):
+                                stowed = False
+                    if event.bite:
+                        stowed = False
                     if stowed:
                         float_visible = False
                         event = replace(event, match=None, locked=False, bite=False, bubbles=False)
@@ -298,16 +334,30 @@ def watch(area, detector, game, auto_reel, stop, latest, rod=None, held_rod=None
                         clear_since = None
                     if event.locked:
                         cast_armed = False
+                        recovery_probe_used = False
                     if not float_visible:
-                        if not water_in_cast_area(frame):
+                        if not water_in_cast_area(frame, 0.75 if automatic else 0.5):
                             clear_since = None
                             event = replace(event, waiting="Aim at visible water to cast.")
                         elif not (cast_armed or recovery_ready):
                             clear_since = None
                             event = replace(event, waiting="Looking for the cast bobber.")
                         elif uncast_rod is not None and not stowed:
-                            clear_since = None
                             event = replace(event, waiting="Checking whether the line is already out.")
+                            if clear_since is None:
+                                clear_since = now
+                            elif now-clear_since >= 8 and not recovery_probe_used and use_verified_rod():
+                                # One controlled probe handles an old cast outside
+                                # the new view or an uncertain stowed-hook pose.
+                                # Require a visual lock before allowing another.
+                                recovery_probe_used = True
+                                cast_armed = True
+                                clear_since = None
+                                last_cast_attempt = now
+                                settle_until = time.monotonic() + CAST_SETTLE
+                                detector.reset()
+                                if audit is not None:
+                                    audit.write('line_recovery_probe', note='Not counted as a catch.')
                         elif clear_since is None:
                             clear_since = now
                         elif now - clear_since >= (INITIAL_CAST_DELAY if uncast_rod else 3):

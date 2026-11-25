@@ -4,7 +4,7 @@ Bobber Buddy is a Windows auto-fisher for Minecraft Bedrock and Java Edition. It
 
 **[Download Bobber Buddy for Windows](https://github.com/scrmarsh/BobberBuddy/releases/latest)**
 
-Latest release **v1.0.5** fixes clipped bobber tracking on laptop displays, early reels during splashes, automatic first-cast recovery, and a minimap that only filled half its square.
+Latest release **v1.0.6** fixes recovery casts that interrupt a visible bobber, adds a closer bobber reference, lets map drags pan the world, and restores player markers and centering after dimension changes.
 
 ## What it does
 
@@ -19,6 +19,8 @@ Latest release **v1.0.5** fixes clipped bobber tracking on laptop displays, earl
 Download the Windows x64 ZIP, extract all its files, and open **Bobber Buddy.exe**. The package targets Windows 10 and 11 and includes Python.
 
 In Bedrock Edition with the default textures, open the app, equip your rod, and aim at open water. Bobber Buddy starts scanning automatically on a clean profile and ignores the rod's durability meter. If it cannot confirm the rod is ready to cast, cast the first line yourself. Use **F10** to toggle auto-fishing or **F9** to stop it immediately.
+
+After walking or turning, stop with the crosshair over water. Fishing waits for the view to settle, then finds the bobber again. If the line state remains uncertain for eight seconds, it can make one recovery click to retrieve an old line or start a new cast. It requires a new visual lock before allowing another recovery probe.
 
 ### Calibrate for Java or custom textures
 
@@ -47,6 +49,8 @@ Use **Save seed…** to name a world and keep it in **Saved seeds**. Pick a save
 The map can appear as an in-game overlay, in a separate window, or both. It supports named waypoints and straight-line compass guidance. It uses Chunk Base, WebView2, Windows OCR, and an internet connection. Use **Open in browser** from the minimap settings if the embedded map is unavailable.
 
 With the in-game overlay enabled, press **Esc** from gameplay to expand the map on the right side of the pause menu. Use **Features** to toggle structures, scroll to the display controls, or drag the map to explore. The map returns to its compact view when you resume.
+
+Choose your current dimension in the map or in Bobber Buddy's Minimap settings. Resume Minecraft after changing it so the app can read the coordinates shown in the game and recenter. A green player marker appears in both map views; the Bedrock HUD does not identify which dimension you entered automatically.
 
 ## Run from source
 

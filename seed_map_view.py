@@ -32,6 +32,7 @@ MINIMAP = """
     const map = document.querySelector('[data-testid="map-container"]');
     if (!map || !map.querySelector('canvas')) return false;
     const canvasBox = map.parentElement;
+    map.dataset.bobberCanvas = '';
     canvasBox.dataset.bobberMap = '';
     const app = map.closest('astro-island') || canvasBox.parentElement.parentElement;
     app.dataset.bobberApp = '';
@@ -73,11 +74,6 @@ MINIMAP = """
                 position: fixed; left: 10px; bottom: 10px; z-index: 2147483646;
                 border-radius: 5px; padding: 6px 9px; background: #101826ed;
                 color: #fff; font: 13px 'Segoe UI', sans-serif; pointer-events: none;
-            }
-            #bobberbuddy-position[data-player]::after {
-                content: ''; position: fixed; left: 50%; top: 50%;
-                width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%);
-                background: #73f5c7; border: 2px solid white; box-shadow: 0 0 0 2px #101826;
             }
         `;
         document.head.append(css);
@@ -256,6 +252,9 @@ def show_route(window, position, route):
                     layer.append(node);
                 };
                 layer.replaceChildren();
+                const [playerX, playerZ] = point(data.position);
+                add('circle', {cx:playerX, cy:playerZ, r:6, fill:'#73f5c7', stroke:'white',
+                               'stroke-width':2, 'data-bobber-player':''});
                 for (const [name, value] of Object.entries(data.points)) {
                     const [cx,cy] = point(value);
                     add('circle',{cx,cy,r:4,fill:'#fbbd67',stroke:'#14171a'});
@@ -296,6 +295,14 @@ def map_world(window):
     """)
 
 
+def map_view_state(window):
+    return execute(window, """(() => {
+        const map = document.querySelector('[data-testid="map-container"]');
+        return {ready: !!map?.hasAttribute('data-bobber-canvas'),
+                dimension: new URLSearchParams(location.hash.slice(1)).get('dimension')};
+    })()""")
+
+
 async def follow(views, config, stopping, zoom_requests=None, pause_requests=None):
     game = MinecraftWindow(config["edition"])
     reader = None
@@ -315,6 +322,7 @@ async def follow(views, config, stopping, zoom_requests=None, pause_requests=Non
     has_overlay = any(overlay for _, overlay, _ in views)
     initialized = set()
     current_center = {}
+    view_dimensions = {}
     shown_status = {}
     navigation = config.get("navigation", {})
     navigation_dirty = True
@@ -368,6 +376,21 @@ async def follow(views, config, stopping, zoom_requests=None, pause_requests=Non
                                    else f"{world_label} · Windows OCR unavailable")
             ready = [(window, overlay) for window, overlay, _ in active if window.uid in initialized]
             for window, overlay in ready:
+                state = map_view_state(window)
+                if state:
+                    dimension = {'overworld': 'Overworld', 'nether': 'Nether', 'end': 'End'}.get(
+                        state.get('dimension'), config['dimension'])
+                    if not state.get('ready'):
+                        if not execute(window, MINIMAP):
+                            initialized.discard(window.uid)
+                            continue
+                        if overlay:
+                            execute(window, OVERLAY_STYLE)
+                        editing_by_view.pop(window.uid, None)
+                    if not state.get('ready') or view_dimensions.get(window.uid) != dimension:
+                        current_center.pop(window.uid, None)
+                        navigation_dirty = True
+                    view_dimensions[window.uid] = dimension
                 if overlay and editing_by_view.get(window.uid, False) != editing:
                     set_map_editing(window, editing)
                     editing_by_view[window.uid] = editing
@@ -449,14 +472,16 @@ async def follow(views, config, stopping, zoom_requests=None, pause_requests=Non
                         confirmation_misses = 0
                         current = position
                         for window, overlay in ready:
+                            dimension = view_dimensions.get(window.uid, config['dimension'])
+                            label = f"Chunk Base · {config['edition'].title()} {config['version']} · {dimension}"
                             if current_center.get(window.uid) != position:
                                 if not center(window, position, player_marker=overlay):
                                     continue
                                 current_center[window.uid] = position
-                            show_status(window, f"{world_label} · Player X {position[0]:,}  Z {position[1]:,}",
+                            show_status(window, f"{label} · Player X {position[0]:,}  Z {position[1]:,}",
                                         player_marker=overlay)
-                            if (navigation or navigation_dirty) and (changed_position or navigation_dirty):
-                                show_route(window, position, navigation)
+                            if changed_position or navigation_dirty:
+                                show_route(window, position, navigation if dimension == config['dimension'] else {})
                         if changed_position or navigation_dirty or time.monotonic() - last_position_write >= 3:
                             try:
                                 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -642,12 +667,12 @@ def main():
     if config["mode"] in FULLSCREEN_MODES:
         display = config["target_display"]
         fullscreen = webview.create_window(f"{APP_NAME} Minimap · Chunk Base", map_url(config),
-                                          width=760, height=640, frameless=True, background_color="#101826")
+                                          width=760, height=640, frameless=True, easy_drag=False, background_color="#101826")
         fullscreen.events.before_show += lambda: place_map(fullscreen, display)
         views.append((fullscreen, False, Event()))
     if config["mode"] in {"overlay", "both"}:
         overlay = webview.create_window(f"{APP_NAME} Game Overlay · Chunk Base", map_url(config, overlay=True),
-                                       width=360, height=360, min_size=(120, 120), frameless=True,
+                                       width=360, height=360, min_size=(120, 120), frameless=True, easy_drag=False,
                                        hidden=True, on_top=True, focus=False, background_color="#101826")
         overlay.events.before_show += lambda: configure_overlay(overlay)
         views.append((overlay, True, Event()))

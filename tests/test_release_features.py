@@ -195,7 +195,8 @@ class FishingDefaultsTests(unittest.TestCase):
     def test_vibrant_bobber_variants_stand_out_in_water(self):
         variants = ((ASSETS / "bedrock-vibrant-bobber.png", 0.89),
                     (ASSETS / "bedrock-vibrant-lit-bobber.png", 0.91),
-                    (ASSETS / "bedrock-vibrant-level-bobber.png", 0.92))
+                    (ASSETS / "bedrock-vibrant-level-bobber.png", 0.92),
+                    (ASSETS / "bedrock-topdown-bobber.png", 0.89))
         detector = Matcher(ASSETS / "bedrock-bobber.png", variants=variants)
         empty = np.full((60, 90, 3), (37, 42, 23), dtype=np.uint8)
         self.assertLess(detector.find(empty).score, 0.82)

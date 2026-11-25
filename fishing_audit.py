@@ -17,7 +17,11 @@ def xp_mask(image):
 
 
 def loot_mask(image):
-    pixels = cv2.resize(image[:, :, :3], (400, 40), interpolation=cv2.INTER_AREA).astype(np.int16)
+    # Stack counts in reward slots 2–5; ignore enchanted books/rods in
+    # later slots, whose shimmer can change without a catch.
+    height, width = image.shape[:2]
+    counts = image[height//2:, :width*4//7, :3]
+    pixels = cv2.resize(counts, (240, 24), interpolation=cv2.INTER_AREA).astype(np.int16)
     return (pixels.min(axis=2) > 185) & (pixels.max(axis=2)-pixels.min(axis=2) < 40)
 
 
@@ -32,6 +36,7 @@ class FishingAudit:
         self.confirmed = self.streak = self.best_streak = self.unconfirmed = 0
         self.xp_confirmed = self.loot_confirmed = 0
         self.before_images = None
+        self.cached_hud = None
         self.state = None
         self.frames = deque(maxlen=50)
         self.bite_frames = None
@@ -57,8 +62,11 @@ class FishingAudit:
 
     def before_reel(self, screen, bounds, number):
         try:
-            image = self.hud(screen, bounds)
-            loot = self.loot_hud(screen, bounds)
+            if self.cached_hud is not None and time.monotonic()-self.cached_hud[2] <= 1:
+                image, loot, _ = self.cached_hud
+            else:
+                image = self.hud(screen, bounds)
+                loot = self.loot_hud(screen, bounds)
             if image is not None and loot is not None:
                 if self.pending is not None:
                     self.write('reward_unconfirmed_before_next_reel', number=self.pending[0])
@@ -105,13 +113,21 @@ class FishingAudit:
         if state != self.state:
             self.state = state
             self.write('state', state=state)
+        if not self.pending and event.watching and now-self.last_sample >= .25:
+            self.last_sample = now
+            try:
+                image, loot = self.hud(screen, bounds), self.loot_hud(screen, bounds)
+                if image is not None and loot is not None:
+                    self.cached_hud = (image.copy(), loot.copy(), now)
+            except (OSError, ValueError, mss.ScreenShotError, cv2.error):
+                self.cached_hud = None
         if self.pending and event.watching and now-self.last_sample >= .25:
             self.last_sample = now
             number, began, baseline, baseline_loot = self.pending
             if now-began >= .6:
                 try:
                     image = self.hud(screen, bounds)
-                    changed = int(np.count_nonzero(xp_mask(image) != baseline)) if image is not None else 0
+                    changed = max(0, int(np.count_nonzero(xp_mask(image)))-int(np.count_nonzero(baseline))) if image is not None else 0
                     loot = self.loot_hud(screen, bounds)
                     loot_changed = int(np.count_nonzero(loot_mask(loot) != baseline_loot)) if loot is not None else 0
                     if changed >= 20 or loot_changed >= 8:
